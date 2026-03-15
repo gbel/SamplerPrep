@@ -38,9 +38,9 @@ def dlfile(url, filename=""):
         with open(filename, "wb") as local_file:
             local_file.write(f.read())
     except HTTPError as e:
-        print("HTTP Error:", e.code, url)
+        print_step(f"HTTP Error: {e.code} {url}")
     except URLError as e:
-        print("URL Error:", e.reason, url)
+        print_step(f"URL Error: {e.reason} {url}")
 
 
 # @see http://stackoverflow.com/a/2186565
@@ -56,8 +56,19 @@ def find_files(path, extensions):
     return matches
 
 
+def pick_subfolder(base_path: Path) -> Path:
+    """If base_path has immediate subdirectories, offer a picker; otherwise return it as-is."""
+    subdirs = sorted(d for d in base_path.iterdir() if d.is_dir())
+    if not subdirs:
+        return base_path
+    choices = [Choice(title=d.name, value=d) for d in subdirs]
+    choices.append(Choice(title=f"All files in {base_path.name}/", value=base_path))
+    return questionary.select("Select source folder:", choices=choices).ask()
+
+
 def print_step(s):
-    print(f">>> {s}")
+    sys.stdout.write(f">>> {s}\r\n")
+    sys.stdout.flush()
 
 
 def load_config(path):
@@ -225,6 +236,21 @@ def preview_card_folder(card_folder):
         sys.stdout.flush()
 
 
+def read_settings(path) -> dict:
+    """Parse a settings.txt file into a dict of string values. Returns {} if file is missing."""
+    try:
+        text = Path(path).read_text()
+    except FileNotFoundError:
+        return {}
+    result = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if "=" in line:
+            k, v = line.split("=", 1)
+            result[k.strip()] = v.strip()
+    return result
+
+
 def write_settings(path, settings):
     with open(path, "w") as f:
         for k, v in settings.items():
@@ -240,7 +266,20 @@ def get_profile(profiles, which_profile):
     return profile
 
 
-def convert_file(source_file, target_file, overwrite):
+def detect_profile(settings_dict: dict, profiles: list) -> str | None:
+    """Return the _name of the first profile whose merged settings match settings_dict,
+    or None. Excludes 'description' and converts merged int values to strings."""
+    for i, p in enumerate(profiles):
+        merged = get_profile(profiles, i)
+        merged.pop("description", None)
+        comparable = {k: str(v) for k, v in merged.items()}
+        candidate = {k: v for k, v in settings_dict.items() if k != "description"}
+        if comparable == candidate:
+            return p["_name"]
+    return None
+
+
+def convert_file(source_file, target_file, overwrite, normalize=False):
     cmd = [
         "ffmpeg",
         "-i",
@@ -257,6 +296,7 @@ def convert_file(source_file, target_file, overwrite):
         "44100",
         "-acodec",
         "pcm_s16le",
+        *(["-af", "loudnorm=I=-16:TP=-1:LRA=11"] if normalize else []),
         target_file,
     ]
     print(" ".join(cmd))
@@ -403,7 +443,8 @@ def create_settings_profile(config):
     print_step("── Summary ──")
     for k, v in p.items():
         if k != "_name":
-            print(f"    {k}={v}")
+            sys.stdout.write(f"    {k}={v}\r\n")
+    sys.stdout.flush()
 
     if not questionary.confirm("Save this profile?", default=True).ask():
         print_step("Discarded.")
@@ -491,6 +532,7 @@ def process(
     overwrite,
     empty_folder,
     overwrite_placeholders=False,
+    normalize=False,
 ):
     files = find_files(str(source_folder), [EXT_RAW] + EXT_OTHER)
     files_in_set = len(files)
@@ -503,6 +545,17 @@ def process(
     vol_root.mkdir(parents=True, exist_ok=True)
     write_settings(str(vol_root / SETTINGS_FILE), settings)
     create_skeleton(vol_root, empty_folder, overwrite_placeholders)
+
+    if overwrite_placeholders:
+        # Existing folder — find the first empty slot so new files append after existing ones.
+        for folder_idx in range(MAX_FOLDERS):
+            folder_path = vol_root / str(folder_idx)
+            n_real = sum(1 for f in folder_path.glob("*.raw") if f.stem.isdigit())
+            if n_real < MAX_FILES_PER_FOLDER:
+                current_folder = folder_idx
+                current_file = n_real
+                break
+
     path = vol_root / str(current_folder)
     folders_started: set[int] = set()
 
@@ -518,7 +571,7 @@ def process(
 
         if not Path(target_file).exists():
             if ext.upper() in EXT_OTHER:
-                convert_file(f, target_file, overwrite)
+                convert_file(f, target_file, overwrite, normalize)
             else:
                 shutil.copy2(f, target_file)
 
@@ -581,7 +634,37 @@ def main():
             choices=[Choice(title=f"{p.name}  ({p})", value=p) for p in volumes],
         ).ask()
 
-        # ── C: Sync mode ──────────────────────────────────────────────────
+        # ── C: Folder scope ───────────────────────────────────────────────
+        bank_dirs = sorted(
+            [p for p in card_folder.iterdir() if p.is_dir() and p.name.isdigit()],
+            key=lambda p: int(p.name),
+        )
+        scope = questionary.select(
+            "Folders to sync:",
+            choices=[
+                Choice("All folders", value="all"),
+                Choice("Specific folders...", value="pick"),
+            ],
+        ).ask()
+
+        if scope == "pick":
+            folder_choices = [
+                Choice(
+                    title=f"Folder {p.name}  "
+                    f"({sum(1 for f in p.glob('*.raw') if f.stem.isdigit())} files)",
+                    value=p,
+                )
+                for p in bank_dirs
+            ]
+            selected_bank_dirs = questionary.checkbox(
+                "Select folders to sync:", choices=folder_choices
+            ).ask()
+            if not selected_bank_dirs:
+                sys.exit("No folders selected.")
+        else:
+            selected_bank_dirs = None  # None = all
+
+        # ── D: Sync mode ──────────────────────────────────────────────────
         sync_mode = questionary.select(
             "Sync mode:",
             choices=[
@@ -596,7 +679,7 @@ def main():
             ],
         ).ask()
 
-        # ── D: Backup (replace only) ──────────────────────────────────────
+        # ── E: Backup (replace only) ──────────────────────────────────────
         backup_path = None
         if sync_mode == "replace":
             if questionary.confirm("Back up the card before syncing?", default=True).ask():
@@ -606,35 +689,51 @@ def main():
                 safe_vol = "".join(c if c.isalnum() or c in "-_" else "_" for c in vol_choice.name)
                 backup_path = root_folder / "backups" / f"{safe_vol}_{ts}"
 
-        # ── E: Overview + confirmation ────────────────────────────────────
-        raw_files = find_files(str(card_folder), [".raw", ".RAW"])
-        num_files = len(raw_files)
-        num_folders = sum(1 for p in card_folder.iterdir() if p.is_dir() and p.name.isdigit())
-
+        # ── F: Overview + confirmation ────────────────────────────────────
         print_step(f"Source      {card_folder}")
         print_step(f"Destination {vol_choice}")
         mode_label = "Add (--ignore-existing)" if sync_mode == "add" else "Replace (--delete)"
         print_step(f"Mode        {mode_label}")
         if backup_path:
             print_step(f"Backup      {backup_path}")
-        print_step(f"Files       {num_files} .raw files in {num_folders} folder(s)")
+        if selected_bank_dirs:
+            folder_nums = ", ".join(
+                p.name for p in sorted(selected_bank_dirs, key=lambda p: int(p.name))
+            )
+            print_step(f"Folders     {folder_nums}")
+        else:
+            raw_files = find_files(str(card_folder), [".raw", ".RAW"])
+            num_files = len(raw_files)
+            num_folders = sum(1 for p in card_folder.iterdir() if p.is_dir() and p.name.isdigit())
+            print_step(f"Files       {num_files} .raw files in {num_folders} folder(s)")
         if sync_mode == "replace":
             print_step("⚠  Files on the card not present in the source folder will be deleted")
 
         if not questionary.confirm("Proceed?", default=(sync_mode == "add")).ask():
             sys.exit("Aborted.")
 
-        # ── F: Execute ────────────────────────────────────────────────────
+        # ── G: Execute ────────────────────────────────────────────────────
         if backup_path:
             print_step(f"Backing up {vol_choice} → {backup_path} ...")
             run_rsync(vol_choice, backup_path, [])
             print_step(f"Backup complete: {backup_path}")
 
         extra = ["--ignore-existing"] if sync_mode == "add" else ["--delete"]
-        print_step(f"Syncing {card_folder} → {vol_choice} ...")
-        run_rsync(card_folder, vol_choice, extra)
+        if selected_bank_dirs:
+            for bank_dir in sorted(selected_bank_dirs, key=lambda p: int(p.name)):
+                dest_dir = vol_choice / bank_dir.name
+                print_step(f"Syncing folder {bank_dir.name} → {dest_dir} ...")
+                run_rsync(bank_dir, dest_dir, extra)
+        else:
+            print_step(f"Syncing {card_folder} → {vol_choice} ...")
+            run_rsync(card_folder, vol_choice, extra)
         print_step("Done.")
         return
+
+    # Save terminal settings before any questionary prompt so we can restore
+    # them before process() runs (questionary disables ISIG, preventing Ctrl-C).
+    _term_fd = sys.stdin.fileno()
+    _saved_term = termios.tcgetattr(_term_fd)
 
     # ── Step 1: Output folder ─────────────────────────────────────────────
     folder_action = questionary.select(
@@ -675,7 +774,41 @@ def main():
         if available < MAX_FILES_PER_FOLDER:
             print_step(f"⚠  Only {available} slots left — files beyond that will not be processed")
 
-    # ── Step 2: Source ────────────────────────────────────────────────────
+    # ── Step 2: Settings Profile ──────────────────────────────────────────
+    existing_settings = {}
+    if is_existing:
+        existing_settings = read_settings(target_folder / SETTINGS_FILE)
+        matched_name = detect_profile(existing_settings, profiles)
+        keep_label = f"Keep current  ({matched_name})" if matched_name else "Keep current  (custom)"
+        profile_choices = [Choice(title=keep_label, value="__keep__")]
+    else:
+        profile_choices = []
+
+    profile_choices += [
+        Choice(
+            title=p["_name"] + (f"  — {p['description']}" if "description" in p else ""),
+            value=p["_name"],
+        )
+        for p in profiles
+    ]
+    profile_choices.append(Choice(title="Create new profile...", value="__new__"))
+
+    profile_name = questionary.select("Settings Profile:", choices=profile_choices).ask()
+
+    if profile_name == "__keep__":
+        settings = existing_settings
+    elif profile_name == "__new__":
+        before_count = len(profiles)
+        create_settings_profile(config)
+        if len(profiles) > before_count:
+            settings = get_profile(profiles, len(profiles) - 1)
+        else:
+            settings = get_profile(profiles, 0)  # cancelled — fall back to default
+    else:
+        which_profile = next(i for i, p in enumerate(profiles) if p["_name"] == profile_name)
+        settings = get_profile(profiles, which_profile)
+
+    # ── Step 3: Source ────────────────────────────────────────────────────
     source_type = questionary.select(
         "Source:",
         choices=[
@@ -687,12 +820,13 @@ def main():
     ).ask()
 
     if source_type == "Default source_material folder":
-        source_folder = Path(config["localSource"])
+        source_folder = pick_subfolder(Path(config["localSource"]))
     elif source_type == "Specify a folder path":
         folder_path = questionary.path("Folder path:").ask()
         source_folder = Path(folder_path)
         if not source_folder.is_dir():
             sys.exit(f"Not a valid directory: {source_folder}")
+        source_folder = pick_subfolder(source_folder)
     elif source_type == "Download a sample pack":
         sets = json.loads(Path("data.json").read_text())["sets"]
         set_name = questionary.select(
@@ -745,6 +879,11 @@ def main():
                 )
                 for s in data["results"]
             ]
+            if not sound_choices:
+                query = questionary.text("No results. Try a different search:").ask()
+                page = 1
+                continue
+
             picked = questionary.checkbox(
                 "Select sounds (space to toggle, enter to confirm):",
                 choices=sound_choices,
@@ -783,29 +922,27 @@ def main():
         source_folder = Path(config["localSource"]) / f"freesound-{safe_query}"
         download_freesound_sounds(selected_sounds, source_folder, api_key)
 
-    # ── Step 3: Settings Profile ──────────────────────────────────────────
-    profile_choices = [
-        Choice(
-            title=p["_name"] + (f"  — {p['description']}" if "description" in p else ""),
-            value=p["_name"],
-        )
-        for p in profiles
-    ]
-    profile_name = questionary.select("Settings Profile:", choices=profile_choices).ask()
-    which_profile = next(i for i, p in enumerate(profiles) if p["_name"] == profile_name)
-    settings = get_profile(profiles, which_profile)
-
     # ── Step 4: Process ───────────────────────────────────────────────────
     empty_folder = config.get("emptyFolder", "./empty_folder/")
-    process(
-        source_folder,
-        target_folder,
-        key,
-        settings,
-        config["overwriteConvertedFiles"],
-        empty_folder,
-        overwrite_placeholders=is_existing,
-    )
+    termios.tcsetattr(_term_fd, termios.TCSADRAIN, _saved_term)
+    try:
+        process(
+            source_folder,
+            target_folder,
+            key,
+            settings,
+            config["overwriteConvertedFiles"],
+            empty_folder,
+            overwrite_placeholders=is_existing,
+            normalize=config.get("normalizeVolume", False),
+        )
+    except KeyboardInterrupt:
+        sys.stdout.write("\r\n⚠  Interrupted.\r\n")
+        sys.stdout.flush()
+        sys.exit(1)
+
+    if questionary.confirm("Preview processed files?", default=True).ask():
+        preview_card_folder(target_folder)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
     "rootFolder": "./card_folders/",
     "emptyFolder": "./empty_folder/",
     "overwriteConvertedFiles": true,
+    "normalizeVolume": true,
     "localSource": "./source_material/",
     "profiles": [
         {
@@ -30,6 +31,21 @@
             "StartPotImmediate": 1,
             "StartCVImmediate": 1,
             "StartCVDivider": 1
+        },
+        {
+            "_name": "pitchable",
+            "Looping": 1,
+            "ChanPotImmediate": 0,
+            "ChanCVImmediate": 0,
+            "pitchMode": 1,
+            "rootNote": 60,
+            "noteRange": 24,
+            "quantiseNoteCV": 1,
+            "quantiseNotePot": 1,
+            "MUTE": 1,
+            "DECLICK": 50,
+            "ShowMeter": 1,
+            "meterHIDE": 500
         }
     ]
 }
