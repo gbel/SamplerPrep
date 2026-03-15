@@ -1,5 +1,6 @@
 {
     "rootFolder": "./card_folders/",
+    "emptyFolder": "./empty_folder/",
     "overwriteConvertedFiles": true,
     "localSource": "./source_material/",
     "profiles": [

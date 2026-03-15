@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 import questionary
+from questionary import Choice
 
 EXT_RAW = ".RAW"
 EXT_OTHER = [".WAV", ".AIF", ".MP3", ".MP4", ".OGG", ".M4A"]
@@ -110,7 +111,20 @@ def vol_root_for(target_folder, key, volume):
     return target_folder.parent / f"{key}-{volume}"
 
 
-def process(source_folder, target_folder, key, settings, overwrite):
+def create_skeleton(vol_root, empty_folder, overwrite_placeholders=False):
+    """Create all 16 numbered folders and seed each with empty_folder placeholder files."""
+    src = Path(empty_folder)
+    placeholder_files = list(src.glob("*.raw")) + list(src.glob("*.RAW"))
+    for i in range(MAX_FOLDERS):
+        folder = vol_root / str(i)
+        folder.mkdir(parents=True, exist_ok=True)
+        for src in placeholder_files:
+            dst = folder / src.name
+            if overwrite_placeholders or not dst.exists():
+                shutil.copy2(str(src), str(dst))
+
+
+def process(source_folder, target_folder, key, settings, overwrite, empty_folder, overwrite_placeholders=False):
     files = find_files(str(source_folder), [EXT_RAW] + EXT_OTHER)
     files_in_set = len(files)
     print_step(f"Found {files_in_set} files")
@@ -122,18 +136,19 @@ def process(source_folder, target_folder, key, settings, overwrite):
     vol_root = vol_root_for(target_folder, key, current_volume)
     vol_root.mkdir(parents=True, exist_ok=True)
     write_settings(str(vol_root / SETTINGS_FILE), settings)
+    create_skeleton(vol_root, empty_folder, overwrite_placeholders)
     path = vol_root / str(current_folder)
-    path.mkdir(parents=True, exist_ok=True)
 
     for f in files:
         print_step(f)
         target_file = str(path / f"{current_file}.raw")
         _, ext = os.path.splitext(f)
 
-        if ext.upper() in EXT_OTHER:
-            convert_file(f, target_file, overwrite)
-        else:
-            shutil.copy2(f, target_file)
+        if not Path(target_file).exists():
+            if ext.upper() in EXT_OTHER:
+                convert_file(f, target_file, overwrite)
+            else:
+                shutil.copy2(f, target_file)
 
         current_file += 1
 
@@ -146,8 +161,8 @@ def process(source_folder, target_folder, key, settings, overwrite):
                 vol_root = vol_root_for(target_folder, key, current_volume)
                 vol_root.mkdir(parents=True, exist_ok=True)
                 write_settings(str(vol_root / SETTINGS_FILE), settings)
+                create_skeleton(vol_root, empty_folder, overwrite_placeholders)
             path = vol_root / str(current_folder)
-            path.mkdir(parents=True, exist_ok=True)
 
     print_step(f"Done — {current_volume + 1} volume(s) written to {target_folder}")
 
@@ -175,6 +190,7 @@ def main():
                 sys.exit("Aborted.")
         target_folder.mkdir(parents=True, exist_ok=True)
         key = folder_name
+        is_existing = False
     else:
         existing = sorted(d.name for d in root_folder.iterdir() if d.is_dir())
         if not existing:
@@ -182,6 +198,7 @@ def main():
         folder_name = questionary.select("Select folder:", choices=existing).ask()
         target_folder = root_folder / folder_name
         key = folder_name
+        is_existing = True
 
     # ── Step 2: Source ────────────────────────────────────────────────────
     source_type = questionary.select(
@@ -221,13 +238,21 @@ def main():
     # ── Step 3: Profile ───────────────────────────────────────────────────
     profile_name = questionary.select(
         "Profile:",
-        choices=[p["_name"] for p in profiles],
+        choices=[
+            Choice("default    — loops, slowed CV on start position", value="default"),
+            Choice("oneshots   — plays once and stops, full CV resolution", value="oneshots"),
+            Choice("immediate  — loops, start jumps instantly with pot/CV", value="immediate"),
+        ],
     ).ask()
     which_profile = next(i for i, p in enumerate(profiles) if p["_name"] == profile_name)
     settings = get_profile(profiles, which_profile)
 
     # ── Step 4: Process ───────────────────────────────────────────────────
-    process(source_folder, target_folder, key, settings, config["overwriteConvertedFiles"])
+    empty_folder = config.get("emptyFolder", "./empty_folder/")
+    process(
+        source_folder, target_folder, key, settings, config["overwriteConvertedFiles"], empty_folder,
+        overwrite_placeholders=is_existing,
+    )
 
 
 if __name__ == "__main__":
