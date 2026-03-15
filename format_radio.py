@@ -105,6 +105,20 @@ def set_extension(filename, extension):
     return name + extension
 
 
+def find_mounted_volumes():
+    """Return sorted list of directories under /Volumes."""
+    volumes = Path("/Volumes")
+    if not volumes.is_dir():
+        return []
+    return sorted(p for p in volumes.iterdir() if p.is_dir())
+
+
+def run_rsync(src, dst, extra_flags):
+    """Run rsync from src/ to dst/ with extra_flags."""
+    cmd = ["rsync", "-av", "--progress"] + extra_flags + [f"{src}/", f"{dst}/"]
+    subprocess.run(cmd, check=True)
+
+
 def analyse_vol_root(vol_root):
     """Return (used_slots, available_slots) for an existing volume root."""
     used = 0
@@ -114,13 +128,6 @@ def analyse_vol_root(vol_root):
             used += sum(1 for f in folder.glob("*.raw") if f.stem.isdigit())
     available = MAX_FILES_PER_VOLUME - used
     return used, available
-
-
-def vol_root_for(target_folder, key, volume):
-    """Volume 0 lives directly in target_folder; overflow volumes are siblings."""
-    if volume == 0:
-        return target_folder
-    return target_folder.parent / f"{key}-{volume}"
 
 
 def freesound_search(query, api_key, page=1, page_size=15):
@@ -173,17 +180,15 @@ def process(
     overwrite,
     empty_folder,
     overwrite_placeholders=False,
-    is_existing=False,
 ):
     files = find_files(str(source_folder), [EXT_RAW] + EXT_OTHER)
     files_in_set = len(files)
     print_step(f"Found {files_in_set} files")
 
-    current_volume = 0
     current_folder = 0
     current_file = 0
 
-    vol_root = vol_root_for(target_folder, key, current_volume)
+    vol_root = target_folder
     vol_root.mkdir(parents=True, exist_ok=True)
     write_settings(str(vol_root / SETTINGS_FILE), settings)
     create_skeleton(vol_root, empty_folder, overwrite_placeholders)
@@ -206,18 +211,11 @@ def process(
             current_file = 0
             current_folder += 1
             if current_folder == MAX_FOLDERS:
-                if is_existing:
-                    print_step("⚠  Folder is full — remaining files will not be processed")
-                    break
-                current_volume += 1
-                current_folder = 0
-                vol_root = vol_root_for(target_folder, key, current_volume)
-                vol_root.mkdir(parents=True, exist_ok=True)
-                write_settings(str(vol_root / SETTINGS_FILE), settings)
-                create_skeleton(vol_root, empty_folder, overwrite_placeholders)
+                print_step("⚠  Folder is full — remaining files will not be processed")
+                break
             path = vol_root / str(current_folder)
 
-    print_step(f"Done — {current_volume + 1} volume(s) written to {target_folder}")
+    print_step(f"Done — written to {target_folder}")
 
 
 def main():
@@ -225,6 +223,84 @@ def main():
     profiles = config["profiles"]
     root_folder = Path(config["rootFolder"])
     root_folder.mkdir(parents=True, exist_ok=True)
+
+    # ── Top-level action ──────────────────────────────────────────────────
+    top_action = questionary.select(
+        "What would you like to do?",
+        choices=["Prepare card folder", "Copy folder to SD card"],
+    ).ask()
+
+    if top_action == "Copy folder to SD card":
+        # ── A: Source card folder ─────────────────────────────────────────
+        card_folders = sorted(d.name for d in root_folder.iterdir() if d.is_dir())
+        if not card_folders:
+            sys.exit(f"No card folders found in {root_folder}")
+        folder_name = questionary.select("Card folder to copy:", choices=card_folders).ask()
+        card_folder = root_folder / folder_name
+
+        # ── B: Destination volume ─────────────────────────────────────────
+        volumes = find_mounted_volumes()
+        if not volumes:
+            sys.exit("No volumes found at /Volumes.")
+        vol_choice = questionary.select(
+            "Destination volume:",
+            choices=[Choice(title=f"{p.name}  ({p})", value=p) for p in volumes],
+        ).ask()
+
+        # ── C: Sync mode ──────────────────────────────────────────────────
+        sync_mode = questionary.select(
+            "Sync mode:",
+            choices=[
+                Choice(
+                    "Add — copy new files, preserve everything already on card",
+                    value="add",
+                ),
+                Choice(
+                    "Replace — full sync, remove files not in source folder",
+                    value="replace",
+                ),
+            ],
+        ).ask()
+
+        # ── D: Backup (replace only) ──────────────────────────────────────
+        backup_path = None
+        if sync_mode == "replace":
+            if questionary.confirm("Back up the card before syncing?", default=True).ask():
+                from datetime import datetime
+
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_vol = "".join(c if c.isalnum() or c in "-_" else "_" for c in vol_choice.name)
+                backup_path = root_folder / "backups" / f"{safe_vol}_{ts}"
+
+        # ── E: Overview + confirmation ────────────────────────────────────
+        raw_files = find_files(str(card_folder), [".raw", ".RAW"])
+        num_files = len(raw_files)
+        num_folders = sum(1 for p in card_folder.iterdir() if p.is_dir() and p.name.isdigit())
+
+        print_step(f"Source      {card_folder}")
+        print_step(f"Destination {vol_choice}")
+        mode_label = "Add (--ignore-existing)" if sync_mode == "add" else "Replace (--delete)"
+        print_step(f"Mode        {mode_label}")
+        if backup_path:
+            print_step(f"Backup      {backup_path}")
+        print_step(f"Files       {num_files} .raw files in {num_folders} folder(s)")
+        if sync_mode == "replace":
+            print_step("⚠  Files on the card not present in the source folder will be deleted")
+
+        if not questionary.confirm("Proceed?", default=(sync_mode == "add")).ask():
+            sys.exit("Aborted.")
+
+        # ── F: Execute ────────────────────────────────────────────────────
+        if backup_path:
+            print_step(f"Backing up {vol_choice} → {backup_path} ...")
+            run_rsync(vol_choice, backup_path, [])
+            print_step(f"Backup complete: {backup_path}")
+
+        extra = ["--ignore-existing"] if sync_mode == "add" else ["--delete"]
+        print_step(f"Syncing {card_folder} → {vol_choice} ...")
+        run_rsync(card_folder, vol_choice, extra)
+        print_step("Done.")
+        return
 
     # ── Step 1: Output folder ─────────────────────────────────────────────
     folder_action = questionary.select(
@@ -321,9 +397,7 @@ def main():
 
         while True:
             data = freesound_search(query, api_key, page=page)
-            total = data["count"]
-            results = data["results"]
-            print_step(f"{total} result(s) — page {page}")
+            print_step(f"{data['count']} result(s) — page {page}")
 
             sound_choices = [
                 Choice(
@@ -333,32 +407,37 @@ def main():
                     ),
                     value=s,
                 )
-                for s in results
+                for s in data["results"]
             ]
-            nav_choices = []
-            if data["next"]:
-                nav_choices.append(Choice("→ Next page", value="__next__"))
-            nav_choices.append(Choice("✓ Done selecting", value="__done__"))
-
             picked = questionary.checkbox(
                 "Select sounds (space to toggle, enter to confirm):",
-                choices=sound_choices + nav_choices,
+                choices=sound_choices,
             ).ask()
 
             if picked is None:
                 sys.exit("Aborted.")
 
-            advance = False
-            for item in picked:
-                if item == "__next__":
-                    page += 1
-                    advance = True
-                elif item == "__done__":
-                    pass
-                elif item not in selected_sounds:
-                    selected_sounds.append(item)
+            for s in picked:
+                if s not in selected_sounds:
+                    selected_sounds.append(s)
 
-            if not advance:
+            nav_options = ["✓ Download selected"]
+            if data["next"]:
+                nav_options.insert(0, "→ Next page")
+            nav_options.append("⟳ New search")
+
+            action = questionary.select(
+                f"{len(selected_sounds)} sound(s) selected — what next?",
+                choices=nav_options,
+            ).ask()
+
+            if action == "→ Next page":
+                page += 1
+            elif action == "⟳ New search":
+                query = questionary.text("Search Freesound:").ask()
+                page = 1
+                selected_sounds = []
+            else:
                 break
 
         if not selected_sounds:
@@ -390,7 +469,6 @@ def main():
         config["overwriteConvertedFiles"],
         empty_folder,
         overwrite_placeholders=is_existing,
-        is_existing=is_existing,
     )
 
 

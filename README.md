@@ -9,8 +9,6 @@ Prepares sound packs for use with [Music Thing Modular's Radio Music](https://gi
 - Always creates the full 16-folder skeleton (folders 0–15), seeding empty folders with placeholder files from `empty_folder/`
 - Writes a `settings.txt` for the selected profile
 - Downloads sample packs from the built-in repository ([data.json](data.json))
-- Splits large packs across multiple volumes (sibling folders on the same card) when they exceed 768 files
-
 When expanding an **existing** card folder, placeholder files are refreshed and existing numbered audio files are never overwritten.
 
 ## Requirements
@@ -125,4 +123,4 @@ Profiles merge with `default` — you only need to specify keys that differ. The
 
 - Tested on macOS
 - Files already present in a target folder are never overwritten (new slots are filled in sequence)
-- Packs with more than 768 files overflow into sibling volumes (`key-1/`, `key-2/`, …); when expanding an existing folder overflow is not created — files beyond capacity are skipped with a warning
+- Sources with more than 768 files are truncated at the limit with a warning — no overflow volumes are created
