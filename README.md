@@ -1,131 +1,128 @@
 # Format Radio
 
-## Helping you get sound packs into your Radio Music
+Prepares sound packs for use with [Music Thing Modular's Radio Music](https://github.com/TomWhitwell/RadioMusic).
 
-### What it is
+## What it does
 
-This is a small command line tool written in Python that prepares sound packs for use with [Music Thing Modular's Radio Music](https://github.com/TomWhitwell/RadioMusic).
+- Converts WAV, AIF, MP3, MP4, OGG, and M4A files to RAW (16-bit signed, mono, 44100 Hz — per [Radio Music specs](https://github.com/TomWhitwell/RadioMusic/wiki/SD-Card%3A-Format-%26-File-Structure#setting-up-files-on-the-micro-sd-card))
+- Renames files sequentially (0.raw, 1.raw, …) to ensure 8.3-compatible names
+- Always creates the full 16-folder skeleton (folders 0–15), seeding empty folders with placeholder files from `empty_folder/`
+- Writes a `settings.txt` for the selected profile
+- Downloads sample packs from the built-in repository ([data.json](data.json))
+- Splits large packs across multiple volumes (sibling folders on the same card) when they exceed 768 files
 
-### What it does
-
-* Downloads sound packs from a configurable ["repository"](data.json), currently stocked with a selection of [packs from Music Radar](http://www.musicradar.com/news/tech/free-music-samples-download-loops-hits-and-multis-217833/)
-* Converts WAV files to RAW (according to [Radio Music specs](https://github.com/TomWhitwell/RadioMusic/wiki/SD-Card%3A-Format-%26-File-Structure#setting-up-files-on-the-micro-sd-card))
-* Renames files to ensure 8.3 names (no clever shortening, just sequential naming of the files)
-* Creates compatible folder structure (16 folders with 75 files max, no more than 330 files in total)
-* Splits sound packs with more files across multiple volumes, ie multiple SD cards.
-
-### What it doesn't do
-
-The Radio Music plays mono files and SD cards are cheap, so the actual size of the files is not considered at all, the tool only handles converting the files and spreading them across a useful and valid folder structure.
-
-The tool doesn't have anything to do with the SD cards themselves, it merely creates a ``settings.txt``, files and folders for you to copy onto a card.
+When expanding an **existing** card folder, placeholder files are refreshed and existing numbered audio files are never overwritten.
 
 ## Requirements
 
-* [Python](https://www.python.org/downloads/release/python-279/) (already available if you're on OS X 10.8+)
-* [ffmpeg](https://www.ffmpeg.org/download.html)
+- Python 3.8+
+- [ffmpeg](https://ffmpeg.org) — install via Homebrew:
+
+```bash
+brew install ffmpeg
+```
 
 ## Installation
 
-* [Download the ZIP](https://github.com/apolakipso/FormatRadio/archive/master.zip) and extract it to a folder
-* Open a terminal and change into that folder
-* Run the script with Python
-
 ```bash
-$ cd ~/Downloads/FormatRadio-master/	# wherever you unzipped the files
-$ python create.py						# run script
+git clone https://github.com/apolakipso/FormatRadio.git
+cd FormatRadio
+pip install questionary
 ```
 
-### Select Profile
-Select a profile, this defines settings for the module (see the **profiles** key in [config.json](config.json)). All profiles are based on the **default** profile, so you only need to specify settings that deviate from the default settings.
+## Usage
 
-**Enter the number of the profile you want to use:**
+Run from the project directory:
 
-![project/select-profile.png](project/select-profile.png)
+```bash
+python format_radio.py
+```
 
-### Select Sound Set
+The tool walks you through four steps:
 
-The tool lists all configured sample packs with number of samples and the size of the archive (NB: This is the filesize of the WAVs, after conversion the resulting files will likely be half that).
+### 1. Output folder
 
-**Enter the number of the sample pack you want to create:**
+Choose to **create a new card folder** or **use an existing one**.
 
-![project/select-set.png](project/select-set.png)
+When using an existing folder, the tool reports how many slots are used and how many remain (max 768 per volume: 16 folders × 48 files).
 
-### Processing
+### 2. Source
 
-Now the sound pack zip will be downloaded, files will be extracted and converted, settings files will be written, all that.
+- **Default source_material folder** — reads from the path set in `config.json` (`localSource`)
+- **Specify a folder path** — tab-completion supported
+- **Download a sample pack** — picks from the built-in list in [data.json](data.json); skips the download if the zip already exists
 
-![project/processing.png](project/processing.png)
+### 3. Profile
 
-**Please note: Currently there is no download progress indicator - depending on the size of the zip, it might just sit there for a bit - give it ample time to finish. No news is good news in this case. I'm looking into how to display a progress indicator.**
+Selects the `settings.txt` written to each volume root:
 
-Once done, the tool will open the folder containing all the volumes created from the sample pack. You can now copy the contents onto an SD card.
+| Profile | Behaviour |
+|---|---|
+| `default` | Loops, slowed CV on start position |
+| `oneshots` | Plays once and stops, full CV resolution |
+| `immediate` | Loops, start position jumps instantly with pot/CV |
+
+### 4. Processing
+
+Files are converted/copied into numbered folders. The full 16-folder skeleton is always created first (see [Folder skeleton](#folder-skeleton)), then audio files are written sequentially into slots.
+
+## Folder skeleton
+
+Every volume always gets the full 16-folder structure (folders `0`–`15`) created before any audio is written. Each folder is seeded with the placeholder RAW files found in `empty_folder/` (`BIRDS.raw` and `VINYL.raw` by default), so the module always has valid audio in every slot even if your source doesn't fill all 16 folders.
+
+Placeholder seeding behaviour:
+
+- **New card folder** — placeholders are written only if the file doesn't already exist
+- **Existing card folder** — placeholders are refreshed (overwritten) so stale placeholders don't persist; your own numbered audio files (`0.raw`, `1.raw`, …) are never touched
+
+You can replace the files in `empty_folder/` with any valid RAW audio to use your own placeholders. The path is configurable via `emptyFolder` in `config.json`.
+
+## Settings customization
+
+Each volume gets a `settings.txt` written to its root. You can customise the values by editing the `profiles` array in `config.json`. All profiles merge on top of `default` — only specify keys that differ. The `_name` key is internal and is not written to the file.
+
+| Setting | Description |
+|---|---|
+| `MUTE` | Mute output on channel change (`0` = off, `1` = on) |
+| `DECLICK` | De-click time in ms when switching channels |
+| `ShowMeter` | Show level meter on display (`0` = off, `1` = on) |
+| `meterHIDE` | Time in ms before meter auto-hides |
+| `ChanPotImmediate` | Channel pot changes take effect immediately (`0` = on next loop) |
+| `ChanCVImmediate` | Channel CV changes take effect immediately |
+| `StartPotImmediate` | Start position pot changes take effect immediately |
+| `StartCVImmediate` | Start position CV changes take effect immediately |
+| `StartCVDivider` | Divides CV resolution for start position (`1` = full, `2` = half, …) |
+| `Looping` | Loop playback (`0` = one-shot, `1` = loop) |
+
+See the [Radio Music wiki](https://github.com/TomWhitwell/RadioMusic/wiki/Customise-your-module%3A-Editing-settings.txt) for the full reference.
 
 ## Configuration
-The file [config.json](config.json) configures a few things. More documentation to follow.
 
-* **rootFolder** sets the path where files are created. *Default: "./output/"*
-* **maxFilesPerVolume** sets the maximum number of files the Radio Music module can handle (on a single SD card). *Default: 330*
-* **maxFolders** sets the maximum number of folders the Radio Music module can handle. *Default: 16*
-* **maxFilesPerFolder** sets the maximum number of files per folder the Radio Music can handle. *Default: 75*
-* **overwriteConvertedFiles** determines whether ffmpeg is instructed to overwrite existing (RAW) files when converting. *Default: true*
-* **mode** determines how files are spread across folders and multiple volumes (large sample packs with more than 330 files can span multiple cards). *Default: "spreadAcrossVolumes"*
-	* **convertOnly** keeps the folder structure of the sample pack, files are only copied, RAW files are converted to WAV. Settings are only written if the pack doesn't already contains a ``settings.txt`` file.
-	* **spreadAcrossBanks** spreads all the files from a sample pack evenly across the banks (330 at the most), this is mostly useful with less than 330 files.
-	* **spreadAcrossVolumes** spreads all the files from a sample pack evenly across the number of volumes required - this should give you the best overall result for large banks.
-	* **maxCapacity** uses 75 samples per folder and fills each volume to the brim (16 folders, 330 files max). This fills up everything as dense as possible, you might end up with an almost empty last volume though.
-	* **voltOctish** uses 60 samples per folder - with CV between 0..+5V we might be able to select a sample per semitone. Untested, possibly even unfounded.
-* **profiles** defines different settings you can select for a sound pack, [read up in the wiki on what the settings mean](https://github.com/TomWhitwell/RadioMusic/wiki/Customise-your-module%3A-Editing-settings.txt). The key **_name** is used to identify the profiles, it will not be written to ``settings.txt``.
+[config.json](config.json) contains:
+
+| Key | Description | Default |
+|---|---|---|
+| `rootFolder` | Where card folders are written | `./card_folders/` |
+| `emptyFolder` | Source of placeholder RAW files for empty folders | `./empty_folder/` |
+| `localSource` | Default source folder when not downloading | `./source_material/` |
+| `overwriteConvertedFiles` | Pass `-y` to ffmpeg (overwrite converted files) | `true` |
+| `profiles` | Array of settings profiles (see below) | — |
+
+Profiles merge with `default` — you only need to specify keys that differ. The `_name` key identifies each profile and is not written to `settings.txt`.
 
 ## Sample Pack Repository
 
-The file [data.json](data.json) lists the sample packs. Basically, this is a list of URLs to ZIP files containing WAV files.
+[data.json](data.json) lists downloadable packs. Each entry has:
 
-A sample pack is defined by the following properties:
-
-* **key** folder names will be derived from this, must be a valid folder name
-* **name** the name of the sample pack as it will be displayed in the selection list
-* **url** URL of the zip file to download
-* **source** optional URL for the sample pack's website (not used anywhere yet)
-* **mode** Allows overriding the mode set in the profile, set to ``convertOnly`` for sample packs you only want to convert without changing the folder structure.
-* **path** specifies the path to the numbered sample folders within the archive, this is treated as the root folder of the sample pack.
-
-### Example 1: Regular *Music Radar* archive
-
-This is a regular zip file containing samples, the selected profile will determine how these are organized.
-
-```json
-{
-	"key": "29-dark-dub",
-	"name": "358 free dark dub samples (379MB)",
-	"url": "http://cdn.mos.musicradar.com/audio/samples/musicradar-dark-dub-samples.zip",
-	"source": "http://www.musicradar.com/news/tech/free-music-samples-download-loops-hits-and-multis-217833/29"
-}
-```
-
-### Example 2: Pre-organized *Answer Phone* archive
-
-This is a zip file containing a curated collection of sounds - the app will keep the folder structure intact but convert WAV files to RAW.
-
-```json
-{
-	"key": "answer-phone-tumblr",
-	"name": "191 Answering Machine Recordings (1.4GB)",
-	"url": "http://www.oomst.com/thonk/3rd-Party/AnswerPhoneCard1.zip",
-	"source": "http://answerphone.tumblr.com",
-	"path": "/OrganizedCard/",
-	"mode": "convertOnly"
-}
-```
-*Note: In this particular case all the files are RAW already.*
-
-## Roadmap
-
-* Allow selection of local folder instead of a repo entry
-* Add download progress info, check whether pywget is better suited than urllib2
-* Fix wording, is it a sound pack, a sound set, or what?
+| Key | Description |
+|---|---|
+| `key` | Used as the folder name — must be a valid directory name |
+| `name` | Display name shown in the selection list |
+| `url` | URL of the zip file to download |
+| `source` | Optional link to the pack's website |
 
 ## Notes
 
-* This has currently been tested on OS X only
-* The script uses ffmpeg to convert WAV to RAW files, this can probably be changed to use [SoX](sox.sourceforge.net) quite easily
+- Tested on macOS
+- Files already present in a target folder are never overwritten (new slots are filled in sequence)
+- Packs with more than 768 files overflow into sibling volumes (`key-1/`, `key-2/`, …); when expanding an existing folder overflow is not created — files beyond capacity are skipped with a warning
