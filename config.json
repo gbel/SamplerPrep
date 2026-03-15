@@ -1,11 +1,7 @@
 {
-    "rootFolder": "./output/",
-    "maxFilesPerVolume": 330,
-    "maxFolders": 16,
-    "maxFilesPerFolder": 75,
+    "rootFolder": "./card_folders/",
     "overwriteConvertedFiles": true,
-    "mode": "voltOctish",
-    "localSource": "./input/",
+    "localSource": "./source_material/",
     "profiles": [
         {
             "_name": "default",
