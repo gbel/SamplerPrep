@@ -3,25 +3,6 @@ revision = 3
 requires-python = ">=3.11"
 
 [[package]]
-name = "format-radio"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "questionary" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "questionary" }]
-
-[package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.15.6" }]
-
-[[package]]
 name = "prompt-toolkit"
 version = "3.0.52"
 source = { registry = "https://pypi.org/simple" }
@@ -69,6 +50,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/89/7a/09ece68445ceac348df06e08bf75db72d0e8427765b96c9c0ffabc1be1d9/ruff-0.15.6-py3-none-win_amd64.whl", hash = "sha256:aee25bc84c2f1007ecb5037dff75cef00414fdf17c23f07dc13e577883dca406", size = 11787271, upload-time = "2026-03-12T23:05:20.168Z" },
     { url = "https://files.pythonhosted.org/packages/7f/d0/578c47dd68152ddddddf31cd7fc67dc30b7cdf639a86275fda821b0d9d98/ruff-0.15.6-py3-none-win_arm64.whl", hash = "sha256:c34de3dd0b0ba203be50ae70f5910b17188556630e2178fd7d79fc030eb0d837", size = 11060497, upload-time = "2026-03-12T23:05:25.968Z" },
 ]
+
+[[package]]
+name = "sampler-prep"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "questionary" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "questionary" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = ">=0.15.6" }]
 
 [[package]]
 name = "wcwidth"
