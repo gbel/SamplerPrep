@@ -6,6 +6,7 @@
     "profiles": [
         {
             "_name": "default",
+            "description": "loops, slowed CV on start position",
             "MUTE": 0,
             "DECLICK": 15,
             "ShowMeter": 1,
@@ -19,11 +20,13 @@
         },
         {
             "_name": "oneshots",
+            "description": "plays once and stops, full CV resolution",
             "StartCVDivider": 1,
             "Looping": 0
         },
         {
             "_name": "immediate",
+            "description": "loops, start position jumps instantly with pot/CV",
             "StartPotImmediate": 1,
             "StartCVImmediate": 1,
             "StartCVDivider": 1

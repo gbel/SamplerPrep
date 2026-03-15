@@ -62,6 +62,20 @@ def load_config(path):
     return json.loads(Path(path).read_text())
 
 
+def load_dotenv(path=".env"):
+    """Parse a .env file and return a dict of key=value pairs."""
+    env = {}
+    try:
+        for line in Path(path).read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+    except FileNotFoundError:
+        pass
+    return env
+
+
 def write_settings(path, settings):
     with open(path, "w") as f:
         for k, v in settings.items():
@@ -103,6 +117,154 @@ def convert_file(source_file, target_file, overwrite):
 def set_extension(filename, extension):
     name, _ = os.path.splitext(filename)
     return name + extension
+
+
+def ask_int(prompt, default, min_val, max_val):
+    """Prompt for an integer in [min_val, max_val], re-prompting on bad input."""
+    while True:
+        raw = questionary.text(f"{prompt} [{default}]:").ask()
+        if raw is None:
+            return default
+        if raw.strip() == "":
+            return default
+        try:
+            v = int(raw.strip())
+            if min_val <= v <= max_val:
+                return v
+        except ValueError:
+            pass
+        print_step(f"⚠  Enter a whole number between {min_val} and {max_val}")
+
+
+def create_settings_profile(config):
+    """Interactive wizard to build and save a new settings profile to config.json."""
+    profiles = config["profiles"]
+    builtin_names = {"default", "oneshots", "immediate"}
+
+    # ── Section 1: Name ───────────────────────────────────────────────────
+    print_step("── Settings Profile: Name ──")
+    while True:
+        name = (questionary.text("Profile name:").ask() or "").strip()
+        if not name:
+            print_step("⚠  Name cannot be empty")
+            continue
+        existing = next((p for p in profiles if p["_name"] == name), None)
+        if existing:
+            if name in builtin_names:
+                print_step(f'⚠  "{name}" is a built-in profile and cannot be overwritten')
+                continue
+            if not questionary.confirm(f'"{name}" already exists. Overwrite?', default=False).ask():
+                continue
+        break
+
+    p = {"_name": name}
+
+    # ── Section 2: Playback ───────────────────────────────────────────────
+    print_step("── Settings Profile: Playback ──")
+    p["Looping"] = questionary.select(
+        "Playback:",
+        choices=[
+            Choice("Loop continuously", value=1),
+            Choice("Play once and stop", value=0),
+        ],
+    ).ask()
+
+    # ── Section 3: Channel control ────────────────────────────────────────
+    print_step("── Settings Profile: Channel control ──")
+    p["ChanPotImmediate"] = int(
+        questionary.confirm("Station knob takes effect immediately?", default=True).ask()
+    )
+    p["ChanCVImmediate"] = int(
+        questionary.confirm("Station CV takes effect immediately?", default=True).ask()
+    )
+
+    # ── Section 4: Start / Pitch mode ─────────────────────────────────────
+    print_step("── Settings Profile: Start / Pitch mode ──")
+    pitch = questionary.select(
+        "START input mode:",
+        choices=[
+            Choice("Position mode  — START controls playback position", value=0),
+            Choice(
+                "Pitch mode     — START controls speed/pitch, reset replays from start",
+                value=1,
+            ),
+        ],
+    ).ask()
+    p["pitchMode"] = pitch
+
+    if pitch:
+        p["rootNote"] = questionary.select(
+            "Root note (pitch at original speed):",
+            choices=[
+                Choice("C2  (MIDI 36)", value=36),
+                Choice("C3  (MIDI 48)", value=48),
+                Choice("C4 / middle C  (MIDI 60)", value=60),
+                Choice("C5  (MIDI 72)", value=72),
+                Choice("C6  (MIDI 84)", value=84),
+            ],
+        ).ask()
+        p["noteRange"] = questionary.select(
+            "Pitch range:",
+            choices=[
+                Choice("1 octave   (12 semitones)", value=12),
+                Choice("2 octaves  (24 semitones)", value=24),
+                Choice("3 octaves  (36 semitones)", value=36),
+                Choice("~3¼ octaves  (39 semitones, default)", value=39),
+                Choice("4 octaves  (48 semitones)", value=48),
+            ],
+        ).ask()
+        p["quantiseNoteCV"] = int(
+            questionary.confirm("Quantise pitch CV to semitones?", default=True).ask()
+        )
+        p["quantiseNotePot"] = int(
+            questionary.confirm("Quantise pitch knob to semitones?", default=True).ask()
+        )
+    else:
+        p["StartPotImmediate"] = int(
+            questionary.confirm("Start position knob immediate?", default=False).ask()
+        )
+        p["StartCVImmediate"] = int(
+            questionary.confirm("Start position CV immediate?", default=False).ask()
+        )
+        p["StartCVDivider"] = ask_int(
+            "Start CV resolution divider (1=finest, 255=coarsest)", 2, 1, 255
+        )
+
+    # ── Section 5: Click reduction ────────────────────────────────────────
+    print_step("── Settings Profile: Click reduction ──")
+    mute = questionary.confirm(
+        "Fade audio on channel change to reduce clicks?", default=False
+    ).ask()
+    p["MUTE"] = int(mute)
+    if mute:
+        p["DECLICK"] = ask_int("Fade duration in ms", 15, 1, 9999)
+
+    # ── Section 6: Display ────────────────────────────────────────────────
+    print_step("── Settings Profile: Display ──")
+    p["ShowMeter"] = questionary.select(
+        "LED display:",
+        choices=[
+            Choice("VU meter", value=1),
+            Choice("Binary bank number", value=0),
+        ],
+    ).ask()
+    p["meterHIDE"] = ask_int("Hide meter after (ms)", 2000, 0, 99999)
+
+    # ── Summary + save ────────────────────────────────────────────────────
+    print_step("── Summary ──")
+    for k, v in p.items():
+        if k != "_name":
+            print(f"    {k}={v}")
+
+    if not questionary.confirm("Save this profile?", default=True).ask():
+        print_step("Discarded.")
+        return
+
+    profiles[:] = [x for x in profiles if x["_name"] != name]
+    profiles.append(p)
+    config["profiles"] = profiles
+    Path("config.json").write_text(json.dumps(config, indent=4))
+    print_step(f'Settings profile "{name}" saved.')
 
 
 def find_mounted_volumes():
@@ -227,8 +389,12 @@ def main():
     # ── Top-level action ──────────────────────────────────────────────────
     top_action = questionary.select(
         "What would you like to do?",
-        choices=["Prepare card folder", "Copy folder to SD card"],
+        choices=["Prepare card folder", "Create Settings Profile", "Copy folder to SD card"],
     ).ask()
+
+    if top_action == "Create Settings Profile":
+        create_settings_profile(config)
+        return
 
     if top_action == "Copy folder to SD card":
         # ── A: Source card folder ─────────────────────────────────────────
@@ -378,7 +544,8 @@ def main():
         unzip(str(archive), str(source_folder))
     else:
         # ── Freesound.org ─────────────────────────────────────────────────
-        api_key = config.get("freesoundApiKey", "")
+        dotenv = load_dotenv()
+        api_key = os.environ.get("FREESOUND_API_KEY") or dotenv.get("FREESOUND_API_KEY") or ""
         if not api_key:
             api_key = (
                 questionary.text("Freesound API key (get one at freesound.org/apiv2):")
@@ -387,9 +554,9 @@ def main():
             )
             if not api_key:
                 sys.exit("No API key provided.")
-            if questionary.confirm("Save key to config.json for future use?").ask():
-                config["freesoundApiKey"] = api_key
-                Path("config.json").write_text(json.dumps(config, indent=4))
+            if questionary.confirm("Save key to .env for future use?").ask():
+                with open(".env", "a") as f:
+                    f.write(f"\nFREESOUND_API_KEY={api_key}\n")
 
         query = questionary.text("Search Freesound:").ask()
         page = 1
@@ -447,15 +614,15 @@ def main():
         source_folder = root_folder / f"freesound-{safe_query}" / "source"
         download_freesound_sounds(selected_sounds, source_folder, api_key)
 
-    # ── Step 3: Profile ───────────────────────────────────────────────────
-    profile_name = questionary.select(
-        "Profile:",
-        choices=[
-            Choice("default    — loops, slowed CV on start position", value="default"),
-            Choice("oneshots   — plays once and stops, full CV resolution", value="oneshots"),
-            Choice("immediate  — loops, start jumps instantly with pot/CV", value="immediate"),
-        ],
-    ).ask()
+    # ── Step 3: Settings Profile ──────────────────────────────────────────
+    profile_choices = [
+        Choice(
+            title=p["_name"] + (f"  — {p['description']}" if "description" in p else ""),
+            value=p["_name"],
+        )
+        for p in profiles
+    ]
+    profile_name = questionary.select("Settings Profile:", choices=profile_choices).ask()
     which_profile = next(i for i, p in enumerate(profiles) if p["_name"] == profile_name)
     settings = get_profile(profiles, which_profile)
 
