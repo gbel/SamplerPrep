@@ -4,6 +4,8 @@ import os
 import shutil
 import subprocess
 import sys
+import termios
+import tty
 import zipfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -74,6 +76,153 @@ def load_dotenv(path=".env"):
     except FileNotFoundError:
         pass
     return env
+
+
+def getch():
+    """Read one keypress in raw mode. Returns bytes; arrow keys return 3-byte sequences."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.buffer.read(1)
+        if ch == b"\x1b":
+            ch2 = sys.stdin.buffer.read(1)
+            if ch2 == b"[":
+                ch3 = sys.stdin.buffer.read(1)
+                return b"\x1b[" + ch3
+        return ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def raw_duration(path):
+    """Return duration in seconds for a 16-bit mono 44100 Hz RAW file."""
+    return Path(path).stat().st_size / (44100 * 2)
+
+
+def play_raw(path):
+    """Start playing a RAW file via sox/play in the background. Returns Popen handle."""
+    cmd = [
+        "play",
+        "-t",
+        "raw",
+        "-r",
+        "44100",
+        "-e",
+        "signed-integer",
+        "-b",
+        "16",
+        "-c",
+        "1",
+        str(path),
+    ]
+    return subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,  # detach from our controlling tty
+    )
+
+
+def render_preview(card_folder, folder_idx, cursor, all_files, playing_idx):
+    """Clear screen and render the preview browser state."""
+    # Use \r\n throughout — OPOST may be disabled (e.g. left so by questionary/prompt_toolkit)
+    # so we cannot rely on \n being translated to CR+LF automatically.
+    NL = "\r\n"
+    out = ["\033[2J\033[H"]  # clear screen + cursor home, sent atomically with the frame
+    divider = "─" * 54
+    out.append(f"  Preview: {card_folder.name}   Folder {folder_idx + 1} / {MAX_FOLDERS}{NL}")
+    out.append(f"  {divider}{NL}")
+    if not all_files:
+        out.append(f"  (empty folder){NL}")
+    for i, f in enumerate(all_files):
+        is_real = f.stem.isdigit()
+        marker = "▶" if i == cursor else " "
+        if is_real:
+            secs = raw_duration(f)
+            dur = f"{secs:.1f}s"
+            playing_tag = "  ♪" if (i == playing_idx) else ""
+            out.append(f"  {marker} {f.name:<12}  {dur}{playing_tag}{NL}")
+        else:
+            secs = raw_duration(f)
+            out.append(f"  {marker} {f.name:<12}  {secs:.1f}s{NL}")
+    out.append(f"  {divider}{NL}")
+    out.append(f"  [↑/↓] navigate   [SPACE] play/stop   [←/→] folder   [D] delete   [Q] quit{NL}")
+    sys.stdout.write("".join(out))
+    sys.stdout.flush()
+
+
+def preview_card_folder(card_folder):
+    """Interactive audio preview browser for a card folder."""
+    folder_idx = 0
+    cursor = 0
+    proc = None
+    playing_idx = None
+
+    try:
+        while True:
+            folder = card_folder / str(folder_idx)
+            real_files = sorted(
+                (f for f in folder.glob("*.raw") if f.stem.isdigit()),
+                key=lambda f: int(f.stem),
+            )
+            placeholders = sorted(f for f in folder.glob("*.raw") if not f.stem.isdigit())
+            all_files = list(real_files) + list(placeholders)
+
+            cursor = max(0, min(cursor, len(all_files) - 1))
+
+            if proc is not None and proc.poll() is not None:
+                proc = None
+                playing_idx = None
+
+            render_preview(card_folder, folder_idx, cursor, all_files, playing_idx)
+
+            key = getch()
+
+            if key in (b"q", b"Q", b"\x1b"):
+                break
+            elif key in (b"\x1b[A", b"k"):  # up
+                cursor = max(0, cursor - 1)
+            elif key in (b"\x1b[B", b"j"):  # down
+                cursor = min(len(all_files) - 1, cursor + 1)
+            elif key == b"\x1b[D":  # left → prev folder
+                if proc:
+                    proc.terminate()
+                    proc = None
+                    playing_idx = None
+                folder_idx = (folder_idx - 1) % MAX_FOLDERS
+                cursor = 0
+            elif key == b"\x1b[C":  # right → next folder
+                if proc:
+                    proc.terminate()
+                    proc = None
+                    playing_idx = None
+                folder_idx = (folder_idx + 1) % MAX_FOLDERS
+                cursor = 0
+            elif key == b" ":  # space → play / stop
+                if proc and proc.poll() is None:
+                    proc.terminate()
+                    proc.wait()
+                    proc = None
+                    playing_idx = None
+                elif all_files:
+                    proc = play_raw(all_files[cursor])
+                    playing_idx = cursor
+            elif key in (b"d", b"D"):  # delete current file
+                if all_files:
+                    target = all_files[cursor]
+                    if proc and playing_idx == cursor:
+                        proc.terminate()
+                        proc = None
+                        playing_idx = None
+                    target.unlink()
+    finally:
+        if proc:
+            proc.terminate()
+            proc.wait()
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
 
 
 def write_settings(path, settings):
@@ -355,9 +504,15 @@ def process(
     write_settings(str(vol_root / SETTINGS_FILE), settings)
     create_skeleton(vol_root, empty_folder, overwrite_placeholders)
     path = vol_root / str(current_folder)
+    folders_started: set[int] = set()
 
     for f in files:
         print_step(f)
+        if current_folder not in folders_started:
+            for placeholder in path.glob("*.raw"):
+                if not placeholder.stem.isdigit():
+                    placeholder.unlink()
+            folders_started.add(current_folder)
         target_file = str(path / f"{current_file}.raw")
         _, ext = os.path.splitext(f)
 
@@ -389,8 +544,21 @@ def main():
     # ── Top-level action ──────────────────────────────────────────────────
     top_action = questionary.select(
         "What would you like to do?",
-        choices=["Prepare card folder", "Create Settings Profile", "Copy folder to SD card"],
+        choices=[
+            "Prepare card folder",
+            "Preview card folder",
+            "Create Settings Profile",
+            "Copy folder to SD card",
+        ],
     ).ask()
+
+    if top_action == "Preview card folder":
+        folders = sorted(d.name for d in root_folder.iterdir() if d.is_dir())
+        if not folders:
+            sys.exit(f"No card folders found in {root_folder}")
+        folder_name = questionary.select("Card folder to preview:", choices=folders).ask()
+        preview_card_folder(root_folder / folder_name)
+        return
 
     if top_action == "Create Settings Profile":
         create_settings_profile(config)
@@ -532,8 +700,9 @@ def main():
             choices=[s["name"] for s in sets],
         ).ask()
         s = next(s for s in sets if s["name"] == set_name)
-        source_folder = root_folder / s["key"] / "source"
-        archive = source_folder / f"{s['key']}.zip"
+        local_source = Path(config["localSource"])
+        source_folder = local_source / s["key"] / "source"
+        archive = local_source / s["key"] / f"{s['key']}.zip"
         source_folder.mkdir(parents=True, exist_ok=True)
         if not archive.exists():
             print_step(f"Downloading {s['name']}...")
@@ -611,7 +780,7 @@ def main():
             sys.exit("No sounds selected.")
 
         safe_query = "".join(c if c.isalnum() or c in "-_" else "_" for c in query)[:40]
-        source_folder = root_folder / f"freesound-{safe_query}" / "source"
+        source_folder = Path(config["localSource"]) / f"freesound-{safe_query}"
         download_freesound_sounds(selected_sounds, source_folder, api_key)
 
     # ── Step 3: Settings Profile ──────────────────────────────────────────
