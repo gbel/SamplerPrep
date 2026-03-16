@@ -3,6 +3,7 @@
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import questionary
@@ -14,7 +15,7 @@ from samplerprep.core import (
     ask_int,
     convert_file,
     find_files,
-    getch,
+    getch_timeout,
     print_step,
 )
 
@@ -308,7 +309,7 @@ def raw_duration(path):
     return Path(path).stat().st_size / (44100 * 2)
 
 
-def play_raw(path):
+def play_raw(path, seek_secs=0.0):
     """Start playing a RAW file via sox/play in the background. Returns Popen handle."""
     import subprocess
 
@@ -326,6 +327,8 @@ def play_raw(path):
         "1",
         str(path),
     ]
+    if seek_secs > 0:
+        cmd += ["trim", str(seek_secs)]
     return subprocess.Popen(
         cmd,
         stdin=subprocess.DEVNULL,
@@ -335,7 +338,9 @@ def play_raw(path):
     )
 
 
-def render_preview(card_folder, folder_idx, cursor, all_files, playing_idx):
+def render_preview(
+    card_folder, folder_idx, cursor, all_files, playing_idx, elapsed=None, total=None
+):
     NL = "\r\n"
     out = ["\033[2J\033[H"]
     divider = "─" * 54
@@ -349,13 +354,27 @@ def render_preview(card_folder, folder_idx, cursor, all_files, playing_idx):
         if is_real:
             secs = raw_duration(f)
             dur = f"{secs:.1f}s"
-            playing_tag = "  ♪" if (i == playing_idx) else ""
+            if i == playing_idx and elapsed is not None:
+                playing_tag = f"  ♪  {elapsed:.1f} / {dur}"
+            elif i == playing_idx:
+                playing_tag = "  ♪"
+            else:
+                playing_tag = ""
             out.append(f"  {marker} {f.name:<12}  {dur}{playing_tag}{NL}")
         else:
             secs = raw_duration(f)
             out.append(f"  {marker} {f.name:<12}  {secs:.1f}s{NL}")
     out.append(f"  {divider}{NL}")
-    out.append(f"  [↑/↓] navigate   [SPACE] play/stop   [←/→] folder   [D] delete   [Q] quit{NL}")
+    if elapsed is not None and total is not None and total > 0:
+        bar_width = 20
+        filled = min(bar_width, int(bar_width * elapsed / total))
+        bar = "█" * filled + "░" * (bar_width - filled)
+        out.append(f"  [{bar}]  {elapsed:.1f} / {total:.1f} s    [,] -5s   [.] +5s{NL}")
+        out.append(f"  {divider}{NL}")
+    out.append(
+        f"  [↑/↓] navigate   [SPACE] play/stop   [,/.] seek ±5s"
+        f"   [←/→] folder   [D] delete   [Q] quit{NL}"
+    )
     sys.stdout.write("".join(out))
     sys.stdout.flush()
 
@@ -366,6 +385,30 @@ def preview(card_folder: Path):
     cursor = 0
     proc = None
     playing_idx = None
+    play_start_time = None  # time.monotonic() when current playback began
+    seek_offset = 0.0  # seconds into file where current playback started
+
+    def current_elapsed():
+        if play_start_time is None:
+            return None
+        return seek_offset + (time.monotonic() - play_start_time)
+
+    def start_playback(file, offset=0.0):
+        nonlocal proc, playing_idx, play_start_time, seek_offset
+        proc = play_raw(file, seek_secs=offset)
+        playing_idx = cursor
+        seek_offset = offset
+        play_start_time = time.monotonic()
+
+    def stop_playback():
+        nonlocal proc, playing_idx, play_start_time, seek_offset
+        if proc:
+            proc.terminate()
+            proc.wait()
+        proc = None
+        playing_idx = None
+        play_start_time = None
+        seek_offset = 0.0
 
     try:
         while True:
@@ -382,10 +425,21 @@ def preview(card_folder: Path):
             if proc is not None and proc.poll() is not None:
                 proc = None
                 playing_idx = None
+                play_start_time = None
+                seek_offset = 0.0
 
-            render_preview(card_folder, folder_idx, cursor, all_files, playing_idx)
+            elapsed = current_elapsed()
+            if playing_idx is not None and all_files:
+                play_total = raw_duration(all_files[playing_idx])
+            else:
+                play_total = None
+            render_preview(
+                card_folder, folder_idx, cursor, all_files, playing_idx, elapsed, play_total
+            )
 
-            key = getch()
+            key = getch_timeout(0.1)
+            if key is None:
+                continue
 
             if key in (b"q", b"Q", b"\x1b"):
                 break
@@ -394,45 +448,44 @@ def preview(card_folder: Path):
                 if proc and proc.poll() is None and cursor != playing_idx and all_files:
                     proc.terminate()
                     proc.wait()
-                    proc = play_raw(all_files[cursor])
-                    playing_idx = cursor
+                    start_playback(all_files[cursor])
             elif key in (b"\x1b[B", b"j"):
                 cursor = min(len(all_files) - 1, cursor + 1)
                 if proc and proc.poll() is None and cursor != playing_idx and all_files:
                     proc.terminate()
                     proc.wait()
-                    proc = play_raw(all_files[cursor])
-                    playing_idx = cursor
+                    start_playback(all_files[cursor])
             elif key == b"\x1b[D":
-                if proc:
-                    proc.terminate()
-                    proc = None
-                    playing_idx = None
+                stop_playback()
                 folder_idx = (folder_idx - 1) % MAX_FOLDERS
                 cursor = 0
             elif key == b"\x1b[C":
-                if proc:
-                    proc.terminate()
-                    proc = None
-                    playing_idx = None
+                stop_playback()
                 folder_idx = (folder_idx + 1) % MAX_FOLDERS
                 cursor = 0
             elif key == b" ":
                 if proc and proc.poll() is None:
+                    stop_playback()
+                elif all_files:
+                    start_playback(all_files[cursor])
+            elif key == b",":
+                if proc and proc.poll() is None and playing_idx is not None:
+                    new_offset = max(0.0, current_elapsed() - 5.0)
                     proc.terminate()
                     proc.wait()
-                    proc = None
-                    playing_idx = None
-                elif all_files:
-                    proc = play_raw(all_files[cursor])
-                    playing_idx = cursor
+                    start_playback(all_files[playing_idx], offset=new_offset)
+            elif key == b".":
+                if proc and proc.poll() is None and playing_idx is not None:
+                    total = raw_duration(all_files[playing_idx])
+                    new_offset = min(total - 0.5, current_elapsed() + 5.0)
+                    proc.terminate()
+                    proc.wait()
+                    start_playback(all_files[playing_idx], offset=new_offset)
             elif key in (b"d", b"D"):
                 if all_files:
                     target = all_files[cursor]
                     if proc and playing_idx == cursor:
-                        proc.terminate()
-                        proc = None
-                        playing_idx = None
+                        stop_playback()
                     target.unlink()
     finally:
         if proc:

@@ -2,6 +2,7 @@
 
 import json
 import os
+import select
 import subprocess
 import sys
 import termios
@@ -86,6 +87,26 @@ def getch():
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
+        ch = sys.stdin.buffer.read(1)
+        if ch == b"\x1b":
+            ch2 = sys.stdin.buffer.read(1)
+            if ch2 == b"[":
+                ch3 = sys.stdin.buffer.read(1)
+                return b"\x1b[" + ch3
+        return ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def getch_timeout(timeout=0.1):
+    """Like getch() but returns None if no key is pressed within `timeout` seconds."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if not ready:
+            return None
         ch = sys.stdin.buffer.read(1)
         if ch == b"\x1b":
             ch2 = sys.stdin.buffer.read(1)
