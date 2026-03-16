@@ -29,6 +29,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["samplerprep"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "card_folders/",
+    "source_material/",
+    "AP Card/",
+    "dist/",
+    ".venv/",
+]
+
 [tool.ruff]
 line-length = 100
 
