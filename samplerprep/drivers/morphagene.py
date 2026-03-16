@@ -4,6 +4,7 @@ Output: files in root of target_folder, named mg1.wav–mgw.wav (32 reels max).
 Format: 32-bit float stereo WAV at 48000 Hz.
 """
 
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -51,6 +52,23 @@ def _concat_wavs(wav_files: list[Path], output_path: Path) -> None:
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     finally:
         list_file.unlink(missing_ok=True)
+
+
+def _rubberband_available() -> bool:
+    return shutil.which("rubberband") is not None
+
+
+def _apply_rubberband(wav_path: Path, pitch_semitones: int = 0, tempo_factor: float = 1.0) -> None:
+    """Apply rubberband pitch/tempo shift to wav_path in-place (via a temp file)."""
+    tmp = wav_path.with_suffix(".rb_out.wav")
+    cmd = ["rubberband", "-2"]
+    if pitch_semitones:
+        cmd += ["-p", str(pitch_semitones)]
+    if tempo_factor != 1.0:
+        cmd += ["-t", str(tempo_factor)]
+    cmd += [str(wav_path), str(tmp)]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    tmp.replace(wav_path)
 
 
 def _aubio_available() -> bool:
@@ -119,6 +137,27 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
         print_step("No files found.")
         return
 
+    # ── Pitch/tempo shift ─────────────────────────────────────────────────────
+    pitch_semitones = 0
+    tempo_factor = 1.0
+    if _rubberband_available():
+        shift_mode = questionary.select(
+            "Pitch/tempo adjustment:",
+            choices=[
+                Choice("None — no adjustment", value="none"),
+                Choice("Shift pitch", value="pitch"),
+                Choice("Stretch tempo", value="tempo"),
+            ],
+        ).ask()
+        if shift_mode == "pitch":
+            pitch_semitones = ask_int("Semitones (negative = lower pitch):", 0, -24, 24)
+        elif shift_mode == "tempo":
+            raw = questionary.text("Tempo factor (e.g. 0.5 = half speed, 2.0 = double):").ask()
+            try:
+                tempo_factor = float(raw or "1.0")
+            except ValueError:
+                tempo_factor = 1.0
+
     # ── Reel creation mode ────────────────────────────────────────────────────
     reel_mode = questionary.select(
         "Reel creation:",
@@ -171,6 +210,8 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
             for i, src in enumerate(files):
                 dst = tmp / f"{i:04d}.wav"
                 convert_file(src, str(dst), device, overwrite, normalize)
+                if pitch_semitones or tempo_factor != 1.0:
+                    _apply_rubberband(dst, pitch_semitones, tempo_factor)
                 converted.append(dst)
                 print_step(f"Converted {Path(src).name}")
 
@@ -209,6 +250,8 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
             print_step(src)
             if not target_file.exists() or overwrite:
                 convert_file(src, str(target_file), device, overwrite, normalize)
+                if pitch_semitones or tempo_factor != 1.0:
+                    _apply_rubberband(target_file, pitch_semitones, tempo_factor)
 
             if splice_mode == "passthrough" and Path(src).suffix.lower() == ".wav":
                 src_info = read_wav_info(Path(src))
