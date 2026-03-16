@@ -3,6 +3,7 @@
 import json
 import os
 import select
+import struct
 import subprocess
 import sys
 import termios
@@ -203,3 +204,87 @@ def download_freesound_sounds(sounds, dest_folder, api_key):
         print_step(f"Downloading: {s['name']}")
         with urlopen(req) as r, open(filename, "wb") as f:
             f.write(r.read())
+
+
+# ── WAV cue-chunk utilities ───────────────────────────────────────────────────
+
+
+def read_wav_info(wav_path: Path) -> dict:
+    """Parse key fields from a WAV file's RIFF headers.
+
+    Returns dict with keys: sample_rate, channels, bits_per_sample, num_samples.
+    Values are 0 if the file is not a valid WAV.
+    """
+    result = {"sample_rate": 0, "channels": 0, "bits_per_sample": 0, "num_samples": 0}
+    data = Path(wav_path).read_bytes()
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return result
+    pos = 12
+    while pos + 8 <= len(data):
+        chunk_id = data[pos : pos + 4]
+        chunk_size = struct.unpack_from("<I", data, pos + 4)[0]
+        if chunk_id == b"fmt ":
+            result["channels"] = struct.unpack_from("<H", data, pos + 10)[0]
+            result["sample_rate"] = struct.unpack_from("<I", data, pos + 12)[0]
+            result["bits_per_sample"] = struct.unpack_from("<H", data, pos + 22)[0]
+        elif chunk_id == b"data":
+            bpf = result["channels"] * (result["bits_per_sample"] // 8) if result["channels"] else 0
+            result["num_samples"] = chunk_size // bpf if bpf else 0
+            break
+        pos += 8 + chunk_size + (chunk_size % 2)
+    return result
+
+
+def read_wav_cues(wav_path: Path) -> list[int]:
+    """Return list of sample offsets from a WAV cue  chunk, or [] if absent."""
+    data = Path(wav_path).read_bytes()
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return []
+    pos = 12
+    while pos + 8 <= len(data):
+        chunk_id = data[pos : pos + 4]
+        chunk_size = struct.unpack_from("<I", data, pos + 4)[0]
+        if chunk_id == b"cue ":
+            num_cues = struct.unpack_from("<I", data, pos + 8)[0]
+            offsets = []
+            for i in range(num_cues):
+                base = pos + 12 + i * 24
+                offsets.append(struct.unpack_from("<I", data, base + 20)[0])
+            return offsets
+        pos += 8 + chunk_size + (chunk_size % 2)
+    return []
+
+
+def write_wav_cues(wav_path: Path, sample_offsets: list[int]) -> None:
+    """Write (or replace) a cue  chunk in an existing WAV file in-place."""
+    if not sample_offsets:
+        return
+    data = bytearray(Path(wav_path).read_bytes())
+    # Drop any existing cue  chunk
+    data = _strip_wav_chunk(data, b"cue ")
+    # Build new cue  chunk: 4-byte count + 24 bytes per cue point
+    num = len(sample_offsets)
+    cue_data = bytearray(struct.pack("<I", num))
+    for i, offset in enumerate(sample_offsets):
+        # id, position, data_chunk_id ("data"), chunk_start, block_start, sample_offset
+        cue_data += struct.pack("<IIIIII", i + 1, 0, 0x61746164, 0, 0, offset)
+    data += b"cue " + struct.pack("<I", len(cue_data)) + bytes(cue_data)
+    struct.pack_into("<I", data, 4, len(data) - 8)
+    Path(wav_path).write_bytes(bytes(data))
+
+
+def _strip_wav_chunk(data: bytearray, chunk_id: bytes) -> bytearray:
+    """Return WAV data with every occurrence of chunk_id removed."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return data
+    result = bytearray(data[:12])
+    pos = 12
+    while pos + 8 <= len(data):
+        cid = data[pos : pos + 4]
+        csz = struct.unpack_from("<I", data, pos + 4)[0]
+        end = pos + 8 + csz + (csz % 2)
+        if cid != chunk_id:
+            result += data[pos:end]
+        pos = end
+    struct.pack_into("<I", result, 4, len(result) - 8)
+    return result
