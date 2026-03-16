@@ -391,8 +391,18 @@ def preview(card_folder: Path):
                 break
             elif key in (b"\x1b[A", b"k"):
                 cursor = max(0, cursor - 1)
+                if proc and proc.poll() is None and cursor != playing_idx and all_files:
+                    proc.terminate()
+                    proc.wait()
+                    proc = play_raw(all_files[cursor])
+                    playing_idx = cursor
             elif key in (b"\x1b[B", b"j"):
                 cursor = min(len(all_files) - 1, cursor + 1)
+                if proc and proc.poll() is None and cursor != playing_idx and all_files:
+                    proc.terminate()
+                    proc.wait()
+                    proc = play_raw(all_files[cursor])
+                    playing_idx = cursor
             elif key == b"\x1b[D":
                 if proc:
                     proc.terminate()
