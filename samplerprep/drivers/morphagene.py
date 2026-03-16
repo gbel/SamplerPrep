@@ -53,6 +53,64 @@ def _concat_wavs(wav_files: list[Path], output_path: Path) -> None:
         list_file.unlink(missing_ok=True)
 
 
+def _aubio_available() -> bool:
+    try:
+        import aubio  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _detect_transients(wav_path: Path, threshold: float = 0.3) -> list[int]:
+    """Return sample offsets of detected onsets in wav_path using aubio.
+
+    Exports a mono downmix via ffmpeg first, since aubio onset detection
+    works on mono audio. Detected positions are reported in the stereo
+    reel's sample space (same sample rate, just one channel reference).
+    """
+    import aubio
+
+    info = read_wav_info(wav_path)
+    sr = info["sample_rate"]
+    hop_size = 512
+    win_size = 1024
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        mono_path = Path(f.name)
+    try:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(wav_path),
+            "-ac",
+            "1",
+            "-ar",
+            str(sr),
+            str(mono_path),
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        src = aubio.source(str(mono_path), sr, hop_size)
+        onset = aubio.onset("default", win_size, hop_size, sr)
+        onset.set_threshold(threshold)
+
+        offsets = []
+        while True:
+            samples, read = src()
+            if onset(samples):
+                pos = onset.get_last()
+                if pos > 0:
+                    offsets.append(pos)
+            if read < hop_size:
+                break
+    finally:
+        mono_path.unlink(missing_ok=True)
+
+    return offsets
+
+
 def process(source_folder, target_folder: Path, device, config, overwrite, normalize):
     files = find_files(str(source_folder), [EXT_RAW] + EXT_OTHER)
     print_step(f"Found {len(files)} files")
@@ -86,12 +144,22 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
             Choice("File boundaries — one splice per source file", value="boundaries")
         )
     splice_choices.append(Choice("Even grid — splice every N seconds", value="grid"))
+    if _aubio_available():
+        splice_choices.append(Choice("Auto-detect transients (aubio)", value="transients"))
 
     splice_mode = questionary.select("Splice markers:", choices=splice_choices).ask()
 
     grid_step_secs = 2
     if splice_mode == "grid":
         grid_step_secs = ask_int("Splice every N seconds:", 2, 1, 60)
+
+    transient_threshold = 0.3
+    if splice_mode == "transients":
+        raw = questionary.text("Detection sensitivity 0.0–1.0 (lower = more splices) [0.3]:").ask()
+        try:
+            transient_threshold = max(0.0, min(1.0, float(raw or "0.3")))
+        except ValueError:
+            transient_threshold = 0.3
 
     target_folder.mkdir(parents=True, exist_ok=True)
     ext = device["extension"]
@@ -126,6 +194,11 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
                 if offsets:
                     write_wav_cues(output_path, offsets)
                     print_step(f"Wrote {len(offsets)} splice marker(s)")
+            elif splice_mode == "transients":
+                offsets = _detect_transients(output_path, transient_threshold)
+                if offsets:
+                    write_wav_cues(output_path, offsets)
+                    print_step(f"Wrote {len(offsets)} splice marker(s)")
 
         print_step(f"Done — 1 reel written to {target_folder}")
 
@@ -150,6 +223,11 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
                 info = read_wav_info(target_file)
                 step = grid_step_secs * info["sample_rate"]
                 offsets = list(range(step, info["num_samples"], step))
+                if offsets:
+                    write_wav_cues(target_file, offsets)
+                    print_step(f"  → wrote {len(offsets)} splice marker(s)")
+            elif splice_mode == "transients":
+                offsets = _detect_transients(target_file, transient_threshold)
                 if offsets:
                     write_wav_cues(target_file, offsets)
                     print_step(f"  → wrote {len(offsets)} splice marker(s)")
