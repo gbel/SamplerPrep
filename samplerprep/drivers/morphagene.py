@@ -92,6 +92,18 @@ def _concat_wavs(wav_files: list[Path], output_path: Path) -> None:
         list_file.unlink(missing_ok=True)
 
 
+def _enforce_min_gap(offsets: list[int], sample_rate: int, min_secs: float = 1.0) -> list[int]:
+    """Remove markers closer than min_secs apart, keeping the earlier one."""
+    min_samples = int(min_secs * sample_rate)
+    result: list[int] = []
+    last = -min_samples
+    for offset in sorted(offsets):
+        if offset - last >= min_samples:
+            result.append(offset)
+            last = offset
+    return result
+
+
 def _trim_reel(path: Path) -> bool:
     """Trim a reel to MAX_REEL_DURATION_SECS in-place if it exceeds the firmware limit.
 
@@ -361,9 +373,7 @@ def process(
     if reel_mode == "per_file":
         splice_choices.append(Choice("Preserve cue points from source WAVs", value="passthrough"))
     if reel_mode == "concat":
-        splice_choices.append(
-            Choice("File boundaries — one splice per source file", value="boundaries")
-        )
+        pass  # boundary markers are added automatically when concatenating multiple files
     splice_choices.append(Choice("Even grid — splice every N seconds", value="grid"))
     if _aubio_available():
         splice_choices.append(Choice("Auto-detect transients (aubio)", value="transients"))
@@ -416,45 +426,39 @@ def process(
                     f" ({MAX_REEL_DURATION_SECS / 60:.1f} min) — Morphagene firmware limit."
                 )
 
-            if splice_mode == "boundaries":
-                offsets = []
+            # Always add file-boundary markers when concatenating multiple files
+            boundary_offsets: list[int] = []
+            if len(converted) > 1:
                 cumulative = 0
-                for wav in converted[:-1]:  # boundary after each file except the last
+                for wav in converted[:-1]:
                     cumulative += read_wav_info(wav)["num_samples"]
-                    offsets.append(cumulative)
-                if len(offsets) > MAX_SPLICE_MARKERS:
-                    print_step(
-                        f"Capped splice markers at {MAX_SPLICE_MARKERS}"
-                        f" ({len(offsets)} detected) — Morphagene firmware limit."
-                    )
-                    offsets = offsets[:MAX_SPLICE_MARKERS]
-                if offsets:
-                    write_wav_cues(output_path, offsets)
-                    print_step(f"Wrote {len(offsets)} splice marker(s)")
-            elif splice_mode == "grid":
+                    boundary_offsets.append(cumulative)
+
+            # Additional markers from user-selected mode
+            extra_offsets: list[int] = []
+            if splice_mode == "grid":
                 info = read_wav_info(output_path)
                 step = grid_step_secs * info["sample_rate"]
-                offsets = list(range(step, info["num_samples"], step))
-                if len(offsets) > MAX_SPLICE_MARKERS:
-                    print_step(
-                        f"Capped splice markers at {MAX_SPLICE_MARKERS}"
-                        f" ({len(offsets)} detected) — Morphagene firmware limit."
-                    )
-                    offsets = offsets[:MAX_SPLICE_MARKERS]
-                if offsets:
-                    write_wav_cues(output_path, offsets)
-                    print_step(f"Wrote {len(offsets)} splice marker(s)")
+                extra_offsets = list(range(step, info["num_samples"], step))
             elif splice_mode == "transients":
-                offsets = _detect_transients(output_path, transient_threshold)
-                if len(offsets) > MAX_SPLICE_MARKERS:
+                extra_offsets = _detect_transients(output_path, transient_threshold)
+
+            all_offsets = boundary_offsets + extra_offsets
+            if all_offsets:
+                info = read_wav_info(output_path)
+                all_offsets = _enforce_min_gap(all_offsets, info["sample_rate"])
+                if len(all_offsets) > MAX_SPLICE_MARKERS:
                     print_step(
                         f"Capped splice markers at {MAX_SPLICE_MARKERS}"
-                        f" ({len(offsets)} detected) — Morphagene firmware limit."
+                        f" ({len(all_offsets)} detected) — Morphagene firmware limit."
                     )
-                    offsets = offsets[:MAX_SPLICE_MARKERS]
-                if offsets:
-                    write_wav_cues(output_path, offsets)
-                    print_step(f"Wrote {len(offsets)} splice marker(s)")
+                    all_offsets = all_offsets[:MAX_SPLICE_MARKERS]
+                write_wav_cues(output_path, all_offsets)
+                if boundary_offsets:
+                    print_step(f"Auto-added {len(boundary_offsets)} file-boundary marker(s)")
+                if extra_offsets:
+                    print_step(f"Added {len(extra_offsets)} {splice_mode} marker(s)")
+                print_step(f"Wrote {len(all_offsets)} splice marker(s) total")
 
         print_step(f"Done — 1 reel written to {target_folder}")
 
@@ -487,6 +491,7 @@ def process(
                 info = read_wav_info(target_file)
                 step = grid_step_secs * info["sample_rate"]
                 offsets = list(range(step, info["num_samples"], step))
+                offsets = _enforce_min_gap(offsets, info["sample_rate"])
                 if len(offsets) > MAX_SPLICE_MARKERS:
                     print_step(
                         f"  Capped splice markers at {MAX_SPLICE_MARKERS}"
@@ -498,6 +503,8 @@ def process(
                     print_step(f"  → wrote {len(offsets)} splice marker(s)")
             elif splice_mode == "transients":
                 offsets = _detect_transients(target_file, transient_threshold)
+                info = read_wav_info(target_file)
+                offsets = _enforce_min_gap(offsets, info["sample_rate"])
                 if len(offsets) > MAX_SPLICE_MARKERS:
                     print_step(
                         f"  Capped splice markers at {MAX_SPLICE_MARKERS}"
@@ -510,10 +517,9 @@ def process(
 
         print_step(f"Done — {len(files)} reel(s) written to {target_folder}")
 
-    if options is not None:
-        state_line, _ = read_options(target_folder / OPTIONS_FILE)
-        write_options(target_folder / OPTIONS_FILE, options, state_line)
-        print_step("Wrote options.txt")
+    state_line, _ = read_options(target_folder / OPTIONS_FILE)
+    write_options(target_folder / OPTIONS_FILE, options or {}, state_line)
+    print_step("Wrote options.txt")
 
 
 def describe_output(device):

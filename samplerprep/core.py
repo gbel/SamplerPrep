@@ -284,7 +284,7 @@ def write_wav_cues(wav_path: Path, sample_offsets: list[int]) -> None:
     cue_data = bytearray(struct.pack("<I", num))
     for i, offset in enumerate(sample_offsets):
         # id, position, data_chunk_id ("data"), chunk_start, block_start, sample_offset
-        cue_data += struct.pack("<IIIIII", i + 1, 0, 0x61746164, 0, 0, offset)
+        cue_data += struct.pack("<IIIIII", i + 1, offset, 0x61746164, 0, 0, offset)
     data += b"cue " + struct.pack("<I", len(cue_data)) + bytes(cue_data)
     struct.pack_into("<I", data, 4, len(data) - 8)
     Path(wav_path).write_bytes(bytes(data))
