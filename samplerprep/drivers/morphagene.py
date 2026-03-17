@@ -21,6 +21,7 @@ from samplerprep.core import (
     convert_file,
     find_files,
     getch_timeout,
+    pick_files,
     print_step,
     read_wav_cues,
     read_wav_info,
@@ -323,12 +324,19 @@ def process(
     overwrite,
     normalize,
     options: dict | None = None,
+    files: list[str] | None = None,
 ):
-    files = find_files(str(source_folder), [EXT_RAW] + EXT_OTHER)
+    if files is None:
+        files = find_files(str(source_folder), [EXT_RAW] + EXT_OTHER)
     print_step(f"Found {len(files)} files")
 
     if not files:
         print_step("No files found.")
+        return
+
+    files = pick_files(files)
+    if not files:
+        print_step("No files selected.")
         return
 
     # ── Pitch/tempo shift ─────────────────────────────────────────────────────

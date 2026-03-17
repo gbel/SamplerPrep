@@ -360,6 +360,7 @@ def main():
             options_preset = driver.get_options_preset(mg_presets, idx)
 
     # Step 3: Source
+    freesound_files: list[str] | None = None
     source_type = questionary.select(
         "Source:",
         choices=[
@@ -471,7 +472,7 @@ def main():
 
         safe_query = "".join(c if c.isalnum() or c in "-_" else "_" for c in query)[:40]
         source_folder = Path(config["localSource"]) / f"freesound-{safe_query}"
-        download_freesound_sounds(selected_sounds, source_folder, api_key)
+        freesound_files = download_freesound_sounds(selected_sounds, source_folder, api_key)
 
     # Step 4: Process
     overwrite = config["overwriteConvertedFiles"]
@@ -503,6 +504,7 @@ def main():
                 overwrite,
                 normalize,
                 options=options_preset,
+                files=freesound_files,
             )
         else:
             driver.process(source_folder, target_folder, device, config, overwrite, normalize)

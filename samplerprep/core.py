@@ -62,6 +62,18 @@ def pick_subfolder(base_path: Path) -> Path:
     return questionary.select("Select source folder:", choices=choices).ask()
 
 
+def pick_files(files: list[str]) -> list[str]:
+    """Checkbox so the user can deselect files before processing.
+
+    Skipped when there is only one file. Returns selected subset.
+    """
+    if len(files) <= 1:
+        return files
+    choices = [questionary.Choice(title=Path(f).name, value=f, checked=True) for f in files]
+    selected = questionary.checkbox("Select files to process:", choices=choices).ask()
+    return selected or []
+
+
 def print_step(s):
     sys.stdout.write(f">>> {s}\r\n")
     sys.stdout.flush()
@@ -210,9 +222,13 @@ def freesound_search(query, api_key, page=1, page_size=15):
         return json.loads(r.read().decode())
 
 
-def download_freesound_sounds(sounds, dest_folder, api_key):
-    """Download HQ-MP3 previews for each selected sound into dest_folder."""
+def download_freesound_sounds(sounds, dest_folder, api_key) -> list[str]:
+    """Download HQ-MP3 previews for each selected sound into dest_folder.
+
+    Returns the list of downloaded file paths as strings.
+    """
     dest_folder.mkdir(parents=True, exist_ok=True)
+    downloaded = []
     for s in sounds:
         url = s["previews"]["preview-hq-mp3"]
         safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in s["name"])[:40]
@@ -221,6 +237,8 @@ def download_freesound_sounds(sounds, dest_folder, api_key):
         print_step(f"Downloading: {s['name']}")
         with urlopen(req) as r, open(filename, "wb") as f:
             f.write(r.read())
+        downloaded.append(str(filename))
+    return downloaded
 
 
 # ── WAV cue-chunk utilities ───────────────────────────────────────────────────
