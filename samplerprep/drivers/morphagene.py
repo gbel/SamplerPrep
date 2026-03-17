@@ -530,6 +530,37 @@ def process(
     print_step("Wrote options.txt")
 
 
+def add_reels(src_folder: Path, dest_folder: Path) -> tuple[int, int]:
+    """Copy Morphagene reels from src_folder into dest_folder, renaming them
+    to fill the first available reel slots not already occupied on dest.
+
+    Returns (copied, skipped) counts.
+    """
+    src_reels = sorted(
+        (f for f in src_folder.glob("mg*.wav") if f.stem in _REEL_NAMES),
+        key=lambda f: _REEL_NAMES.index(f.stem),
+    )
+    if not src_reels:
+        return 0, 0
+
+    occupied = {f.stem for f in dest_folder.glob("mg*.wav") if f.stem in _REEL_NAMES}
+    free_slots = [name for name in _REEL_NAMES if name not in occupied]
+
+    copied = 0
+    for src_reel in src_reels:
+        if not free_slots:
+            remaining = len(src_reels) - copied
+            print_step(f"No free reel slots — skipping {src_reel.name} and {remaining - 1} more")
+            return copied, remaining
+        slot = free_slots.pop(0)
+        dest_path = dest_folder / f"{slot}.wav"
+        print_step(f"{src_reel.name} → {dest_path.name}")
+        shutil.copy2(src_reel, dest_path)
+        copied += 1
+
+    return copied, 0
+
+
 def describe_output(device):
     return "Files in root: mg1.wav–mgw.wav (32 reels max), 32-bit float stereo 48 kHz"
 

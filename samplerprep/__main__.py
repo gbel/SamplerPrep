@@ -122,6 +122,9 @@ def main():
 
     # ── Copy folder to card ───────────────────────────────────────────────────
     if top_action == "Copy folder to card":
+        from samplerprep.drivers.morphagene import _REEL_NAMES as _mg_reel_names
+        from samplerprep.drivers.morphagene import add_reels as mg_add_reels
+
         # Digitakt uses USB, not a card volume
         if device["storage"].startswith("USB"):
             print_step(f"⚠  {device['name']} uses USB transfer — no SD/CF card slot.")
@@ -221,11 +224,22 @@ def main():
             print_step(f"Backup complete: {backup_path}")
 
         extra = ["--ignore-existing"] if sync_mode == "add" else ["--delete"]
+        mg_reels_in_src = any(f.stem in _mg_reel_names for f in card_folder.glob("mg*.wav"))
         if selected_bank_dirs:
             for bank_dir in sorted(selected_bank_dirs, key=lambda p: int(p.name)):
                 dest_dir = vol_choice / bank_dir.name
                 print_step(f"Syncing folder {bank_dir.name} → {dest_dir} ...")
                 run_rsync(bank_dir, dest_dir, extra)
+        elif sync_mode == "add" and mg_reels_in_src:
+            vol_choice.mkdir(parents=True, exist_ok=True)
+            print_step(f"Syncing reels {card_folder} → {vol_choice} ...")
+            copied, skipped = mg_add_reels(card_folder, vol_choice)
+            msg = f"Copied {copied} reel(s)"
+            if skipped:
+                msg += f", {skipped} skipped (card full)"
+            print_step(msg)
+            # Sync non-reel files (options.txt, .metadata_never_index, etc.)
+            run_rsync(card_folder, vol_choice, ["--ignore-existing", "--exclude=mg*.wav"])
         else:
             print_step(f"Syncing {card_folder} → {vol_choice} ...")
             run_rsync(card_folder, vol_choice, extra)
