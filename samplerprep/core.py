@@ -42,6 +42,8 @@ def find_files(path, extensions):
     matches = []
     for root, dirnames, filenames in os.walk(path, topdown=False):
         for filename in filenames:
+            if filename.startswith("."):  # skip macOS hidden / AppleDouble files
+                continue
             _, ext = os.path.splitext(filename)
             if ext.upper() in extensions:
                 p = os.path.join(root, filename)
@@ -171,10 +173,25 @@ def find_mounted_volumes():
     return sorted(p for p in volumes.iterdir() if p.is_dir())
 
 
+_RSYNC_EXCLUDE = [
+    "--exclude=.DS_Store",
+    "--exclude=._*",
+    "--exclude=.Spotlight-V100",
+    "--exclude=.Trashes",
+    "--exclude=.DocumentRevisions-V100",
+    "--exclude=.TemporaryItems",
+    "--exclude=.fseventsd",
+]
+
+
 def run_rsync(src, dst, extra_flags):
     """Run rsync from src/ to dst/ with extra_flags."""
-    cmd = ["rsync", "-av", "--progress"] + extra_flags + [f"{src}/", f"{dst}/"]
-    subprocess.run(cmd, check=True)
+    cmd = ["rsync", "-av", "--progress"] + _RSYNC_EXCLUDE + extra_flags + [f"{src}/", f"{dst}/"]
+    result = subprocess.run(cmd)
+    # Exit code 23 = partial transfer due to unreadable source entries (e.g. macOS
+    # system dirs on the destination volume). Files we care about were transferred.
+    if result.returncode not in (0, 23):
+        raise subprocess.CalledProcessError(result.returncode, cmd)
 
 
 def freesound_search(query, api_key, page=1, page_size=15):

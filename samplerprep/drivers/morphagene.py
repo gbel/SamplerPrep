@@ -31,6 +31,38 @@ from samplerprep.core import (
 _REEL_NAMES = [f"mg{i}" for i in range(1, 10)] + [f"mg{c}" for c in "abcdefghijklmnopqrstuvw"]
 MAX_REELS = 32
 _TARGET_SR = 48000  # Morphagene hardware sample rate
+MAX_REEL_DURATION_SECS = 174  # ~2.9 min firmware limit; files longer than this won't load
+MAX_SPLICE_MARKERS = 300  # firmware limit on cue points per reel
+
+OPTIONS_FILE = "options.txt"
+
+_OPTIONS_DEFS = [
+    (
+        "vsop",
+        0,
+        "Varispeed option: 0 bidirectional classic, 1 bidirectional 1 v/oct, 2 positive only - 1 v/oct",  # noqa: E501
+    ),
+    ("inop", 0, "Input option: 0 record SOS mix, 1 record input only"),
+    (
+        "pmin",
+        0,
+        "Phase/position modulation: 0 no phase modulation, 1 phase playback modulation on right signal input when no signal on left input",  # noqa: E501
+    ),
+    ("omod", 0, "Organize option: 0 organize at end of gene, 1 organize immediately"),
+    ("gnsm", 0, "Gene smooth: 0 classic, 1 smooth gene window"),
+    (
+        "rsop",
+        0,
+        "Record option: 0 record + splice = record new splice, record = record current splice; 1 record + splice = record current splice, record = record new splice",  # noqa: E501
+    ),
+    ("pmod", 0, "Play option: 0 classic, 1 momentary, 2 trigger loop"),
+    (
+        "ckop",
+        0,
+        "Clock control option: 0 hybrid gene shift time stretch, 1 gene shift only, 2 time stretch only",  # noqa: E501
+    ),
+    ("cvop", 0, "CV out: 0 envelope follow, 1 ramp gene"),
+]
 
 
 def _concat_wavs(wav_files: list[Path], output_path: Path) -> None:
@@ -55,6 +87,37 @@ def _concat_wavs(wav_files: list[Path], output_path: Path) -> None:
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     finally:
         list_file.unlink(missing_ok=True)
+
+
+def _trim_reel(path: Path) -> bool:
+    """Trim a reel to MAX_REEL_DURATION_SECS in-place if it exceeds the firmware limit.
+
+    Returns True if the reel was trimmed.
+    """
+    info = read_wav_info(path)
+    if not info["sample_rate"]:
+        return False
+    dur = info["num_samples"] / info["sample_rate"]
+    if dur <= MAX_REEL_DURATION_SECS:
+        return False
+    tmp = path.with_suffix(".trim.wav")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(path),
+            "-t",
+            str(MAX_REEL_DURATION_SECS),
+            "-c",
+            "copy",
+            str(tmp),
+        ],  # noqa: E501
+        check=True,
+        capture_output=True,
+    )
+    tmp.replace(path)
+    return True
 
 
 def _rubberband_available() -> bool:
@@ -132,7 +195,107 @@ def _detect_transients(wav_path: Path, threshold: float = 0.3) -> list[int]:
     return offsets
 
 
-def process(source_folder, target_folder: Path, device, config, overwrite, normalize):
+def read_options(path: Path) -> tuple[str, dict]:
+    """Return (state_line, {key: int_value}). Returns ("0 0 0", {}) if file absent."""
+    if not path.exists():
+        return ("0 0 0", {})
+    state_line = "0 0 0"
+    options = {}
+    lines = path.read_text().splitlines()
+    for i, line in enumerate(lines):
+        if i == 0:
+            state_line = line.strip()
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("//"):
+            continue
+        parts = stripped.split()
+        if len(parts) >= 2:
+            key = parts[0]
+            try:
+                options[key] = int(parts[1])
+            except ValueError:
+                pass
+    return (state_line, options)
+
+
+def write_options(path: Path, options: dict, state_line: str = "0 0 0") -> None:
+    """Write options.txt in correct format."""
+    lines = [state_line, "//", "// firmware version 155", "//"]
+    for key, default, comment in _OPTIONS_DEFS:
+        value = options.get(key, default)
+        lines.append(f"{key} {value} //{comment}")
+    path.write_text("\n".join(lines) + "\n")
+
+
+def get_options_preset(presets: list, which: int) -> dict:
+    """Merge presets[which] over the default preset. Returns complete 9-key dict."""
+    default = next((p for p in presets if p.get("_name") == "default"), {})
+    base = {key: default.get(key, dflt) for key, dflt, _ in _OPTIONS_DEFS}
+    overlay = presets[which]
+    for key, _, _ in _OPTIONS_DEFS:
+        if key in overlay:
+            base[key] = overlay[key]
+    return base
+
+
+def detect_options_preset(current: dict, presets: list) -> str | None:
+    """Return _name of first matching preset, or None."""
+    for i, p in enumerate(presets):
+        merged = get_options_preset(presets, i)
+        if all(current.get(k) == merged[k] for k, _, _ in _OPTIONS_DEFS):
+            return p["_name"]
+    return None
+
+
+def create_options_preset(config: dict) -> None:
+    """Interactive wizard to create a new options preset."""
+    import json
+
+    presets = config.setdefault("morphagene_presets", [])
+    built_in_names = {p["_name"] for p in presets}
+
+    name = questionary.text("Preset name:").ask()
+    if not name:
+        return
+    if name in built_in_names:
+        print_step(f'A preset named "{name}" already exists. Choose a different name.')
+        return
+
+    new_preset: dict = {"_name": name}
+    for key, default, comment in _OPTIONS_DEFS:
+        # Build choices from comment (values described after each comma-separated clause)
+        comment_parts = comment.split(": ", 1)
+        label = comment_parts[0] if comment_parts else key
+        value_descs = comment_parts[1].split(", ") if len(comment_parts) > 1 else []
+        choices = []
+        for desc in value_descs:
+            parts = desc.strip().split(" ", 1)
+            if parts[0].isdigit():
+                val = int(parts[0])
+                desc_text = parts[1] if len(parts) > 1 else str(val)
+                choices.append(Choice(title=f"{val} — {desc_text}", value=val))
+        if not choices:
+            choices = [Choice(title=str(default), value=default)]
+
+        chosen = questionary.select(f"{label}:", choices=choices).ask()
+        new_preset[key] = chosen
+
+    presets.append(new_preset)
+    config_path = Path("config.json")
+    config_path.write_text(json.dumps(config, indent=4) + "\n")
+    print_step(f'Saved preset "{name}" to config.json')
+
+
+def process(
+    source_folder,
+    target_folder: Path,
+    device,
+    config,
+    overwrite,
+    normalize,
+    options: dict | None = None,
+):
     files = find_files(str(source_folder), [EXT_RAW] + EXT_OTHER)
     print_step(f"Found {len(files)} files")
 
@@ -212,6 +375,7 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
             transient_threshold = 0.3
 
     target_folder.mkdir(parents=True, exist_ok=True)
+    (target_folder / ".metadata_never_index").touch()
     ext = device["extension"]
 
     if reel_mode == "concat":
@@ -230,12 +394,24 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
             print_step(f"Concatenating {len(converted)} files → {output_path.name}")
             _concat_wavs(converted, output_path)
 
+            if _trim_reel(output_path):
+                print_step(
+                    f"Reel clipped to {MAX_REEL_DURATION_SECS}s"
+                    f" ({MAX_REEL_DURATION_SECS / 60:.1f} min) — Morphagene firmware limit."
+                )
+
             if splice_mode == "boundaries":
                 offsets = []
                 cumulative = 0
                 for wav in converted[:-1]:  # boundary after each file except the last
                     cumulative += read_wav_info(wav)["num_samples"]
                     offsets.append(cumulative)
+                if len(offsets) > MAX_SPLICE_MARKERS:
+                    print_step(
+                        f"Capped splice markers at {MAX_SPLICE_MARKERS}"
+                        f" ({len(offsets)} detected) — Morphagene firmware limit."
+                    )
+                    offsets = offsets[:MAX_SPLICE_MARKERS]
                 if offsets:
                     write_wav_cues(output_path, offsets)
                     print_step(f"Wrote {len(offsets)} splice marker(s)")
@@ -243,11 +419,23 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
                 info = read_wav_info(output_path)
                 step = grid_step_secs * info["sample_rate"]
                 offsets = list(range(step, info["num_samples"], step))
+                if len(offsets) > MAX_SPLICE_MARKERS:
+                    print_step(
+                        f"Capped splice markers at {MAX_SPLICE_MARKERS}"
+                        f" ({len(offsets)} detected) — Morphagene firmware limit."
+                    )
+                    offsets = offsets[:MAX_SPLICE_MARKERS]
                 if offsets:
                     write_wav_cues(output_path, offsets)
                     print_step(f"Wrote {len(offsets)} splice marker(s)")
             elif splice_mode == "transients":
                 offsets = _detect_transients(output_path, transient_threshold)
+                if len(offsets) > MAX_SPLICE_MARKERS:
+                    print_step(
+                        f"Capped splice markers at {MAX_SPLICE_MARKERS}"
+                        f" ({len(offsets)} detected) — Morphagene firmware limit."
+                    )
+                    offsets = offsets[:MAX_SPLICE_MARKERS]
                 if offsets:
                     write_wav_cues(output_path, offsets)
                     print_step(f"Wrote {len(offsets)} splice marker(s)")
@@ -264,6 +452,12 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
                 if pitch_semitones or tempo_factor != 1.0:
                     _apply_rubberband(target_file, pitch_semitones, tempo_factor)
 
+            if _trim_reel(target_file):
+                print_step(
+                    f"  Reel clipped to {MAX_REEL_DURATION_SECS}s"
+                    f" ({MAX_REEL_DURATION_SECS / 60:.1f} min) — Morphagene firmware limit."
+                )
+
             if splice_mode == "passthrough" and Path(src).suffix.lower() == ".wav":
                 src_info = read_wav_info(Path(src))
                 cues = read_wav_cues(Path(src))
@@ -277,20 +471,110 @@ def process(source_folder, target_folder: Path, device, config, overwrite, norma
                 info = read_wav_info(target_file)
                 step = grid_step_secs * info["sample_rate"]
                 offsets = list(range(step, info["num_samples"], step))
+                if len(offsets) > MAX_SPLICE_MARKERS:
+                    print_step(
+                        f"  Capped splice markers at {MAX_SPLICE_MARKERS}"
+                        f" ({len(offsets)} detected) — Morphagene firmware limit."
+                    )
+                    offsets = offsets[:MAX_SPLICE_MARKERS]
                 if offsets:
                     write_wav_cues(target_file, offsets)
                     print_step(f"  → wrote {len(offsets)} splice marker(s)")
             elif splice_mode == "transients":
                 offsets = _detect_transients(target_file, transient_threshold)
+                if len(offsets) > MAX_SPLICE_MARKERS:
+                    print_step(
+                        f"  Capped splice markers at {MAX_SPLICE_MARKERS}"
+                        f" ({len(offsets)} detected) — Morphagene firmware limit."
+                    )
+                    offsets = offsets[:MAX_SPLICE_MARKERS]
                 if offsets:
                     write_wav_cues(target_file, offsets)
                     print_step(f"  → wrote {len(offsets)} splice marker(s)")
 
         print_step(f"Done — {len(files)} reel(s) written to {target_folder}")
 
+    if options is not None:
+        state_line, _ = read_options(target_folder / OPTIONS_FILE)
+        write_options(target_folder / OPTIONS_FILE, options, state_line)
+        print_step("Wrote options.txt")
+
 
 def describe_output(device):
     return "Files in root: mg1.wav–mgw.wav (32 reels max), 32-bit float stereo 48 kHz"
+
+
+_MACOS_JUNK = [
+    ".DS_Store",
+    ".Spotlight-V100",
+    ".Trashes",
+    ".DocumentRevisions-V100",
+    ".TemporaryItems",
+    ".fseventsd",
+]
+
+
+def clean_card(volume: Path) -> None:
+    """Remove macOS metadata files from a mounted FAT32 Morphagene card.
+
+    macOS creates AppleDouble (._filename) resource-fork shadow files and system
+    directories on FAT32 volumes. The Morphagene firmware tries to load any file in
+    the card root as a reel; when it can't parse these, it overwrites them with a
+    44-byte WAV stub — corrupting recordings. Run this before returning the card to
+    the module.
+    """
+    import shutil
+
+    removed = 0
+    for f in volume.rglob("._*"):
+        f.unlink()
+        removed += 1
+    for name in _MACOS_JUNK:
+        target = volume / name
+        if target.is_file():
+            target.unlink()
+            removed += 1
+        elif target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+            removed += 1
+    print_step(f"Removed {removed} macOS metadata file(s) from {volume}")
+    print_step(
+        "Card is ready to return to the Morphagene.\n"
+        "   Tip: to prevent Spotlight from re-creating metadata on remount, add\n"
+        "   the card volume (usually 'NO NAME') to System Settings → Siri & Spotlight\n"
+        "   → Spotlight Privacy. Otherwise, reinsert immediately after cleaning."
+    )
+
+
+def save_recordings(volume: Path, root_folder: Path) -> "Path | None":
+    """Copy mg*.wav reels from a mounted card to a timestamped local folder.
+
+    Returns the destination path, or None if no recordings were found.
+    Run immediately after inserting the card — macOS Spotlight begins creating
+    AppleDouble (._*) shadow files within seconds of mount, which will corrupt
+    recordings if the card is returned to the Morphagene without cleaning first.
+    """
+    from datetime import datetime
+
+    reels = sorted(
+        (f for f in volume.glob("mg*.wav") if f.stem in _REEL_NAMES),
+        key=lambda f: _REEL_NAMES.index(f.stem),
+    )
+    if not reels:
+        print_step("No mg*.wav recordings found on the card.")
+        return None
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_vol = "".join(c if c.isalnum() or c in "-_" else "_" for c in volume.name)
+    dest = root_folder / f"recordings_{safe_vol}_{ts}"
+    dest.mkdir(parents=True, exist_ok=True)
+
+    for reel in reels:
+        shutil.copy2(reel, dest / reel.name)
+        print_step(f"Saved {reel.name}  ({reel.stat().st_size // 1024} KB)")
+
+    print_step(f"Saved {len(reels)} reel(s) to {dest}")
+    return dest
 
 
 # ── Preview browser ────────────────────────────────────────────────────────────

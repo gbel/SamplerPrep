@@ -47,5 +47,47 @@
             "ShowMeter": 1,
             "meterHIDE": 500
         }
+    ],
+    "morphagene_presets": [
+        {
+            "_name": "default",
+            "vsop": 0,
+            "inop": 0,
+            "pmin": 0,
+            "omod": 0,
+            "gnsm": 0,
+            "rsop": 0,
+            "pmod": 0,
+            "ckop": 0,
+            "cvop": 0
+        },
+        {
+            "_name": "1v/oct bidirectional",
+            "description": "Vari-Speed tracks 1V/oct (bidirectional)",
+            "vsop": 1
+        },
+        {
+            "_name": "1v/oct forward",
+            "description": "Vari-Speed tracks 1V/oct (positive/forward only, more precision)",
+            "vsop": 2
+        },
+        {
+            "_name": "trigger loop",
+            "description": "PLAY input jumps to start point on rising edge; Organize is immediate",
+            "pmod": 2,
+            "omod": 1
+        },
+        {
+            "_name": "gabes",
+            "vsop": 0,
+            "inop": 0,
+            "pmin": 1,
+            "omod": 0,
+            "gnsm": 1,
+            "rsop": 0,
+            "pmod": 0,
+            "ckop": 0,
+            "cvop": 0
+        }
     ]
 }

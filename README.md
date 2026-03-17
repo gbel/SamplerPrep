@@ -125,6 +125,20 @@ Morphagene-specific processing options:
 - **Cue point passthrough** — existing cue points in source WAVs are preserved and rescaled to 48 kHz
 - **Pitch/tempo shift** — shift pitch by semitones or stretch tempo by a factor via rubberband (requires `brew install rubberband`)
 
+#### macOS and Spotlight
+
+When a FAT32 card is mounted on macOS, Spotlight begins indexing it within seconds — even without opening Finder. It creates `._*` AppleDouble shadow files and system directories (`.Spotlight-V100`, `.Trashes`, etc.) in the card root. The Morphagene firmware interprets every file in the root as a reel; when it can't parse these stubs, it overwrites them with a 44-byte WAV file, **corrupting your recordings**.
+
+**Permanent fix — exclude the volume from Spotlight:**
+
+1. Open **System Settings → Siri & Spotlight → Spotlight Privacy** (macOS Ventura+), or **System Preferences → Spotlight → Privacy** (Monterey and earlier).
+2. Click **+** and add the mounted card volume (usually named **NO NAME** for a default FAT32 card).
+3. Click **Done**.
+
+Spotlight will no longer index that volume label. The exclusion persists across remounts as long as the volume label doesn't change. This is a one-time setup and eliminates the root cause entirely.
+
+If you skip this step, use **Clean card** from the Morphagene menu (removes all macOS metadata files) before returning the card to the module.
+
 ### Digitakt
 
 ```

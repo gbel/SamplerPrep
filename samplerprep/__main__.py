@@ -52,6 +52,15 @@ def main():
     if hasattr(driver, "create_settings_profile"):
         action_choices.append("Create Settings Profile")
 
+    if hasattr(driver, "create_options_preset"):
+        action_choices.append("Create Options Preset")
+
+    if hasattr(driver, "save_recordings"):
+        action_choices.append("Save recordings from card")
+
+    if hasattr(driver, "clean_card"):
+        action_choices.append("Clean card before ejecting")
+
     action_choices.append("Copy folder to card")
 
     top_action = questionary.select(
@@ -74,6 +83,41 @@ def main():
     # ── Create Settings Profile ───────────────────────────────────────────────
     if top_action == "Create Settings Profile":
         driver.create_settings_profile(config)
+        return
+
+    # ── Create Options Preset ─────────────────────────────────────────────────
+    if top_action == "Create Options Preset":
+        driver.create_options_preset(config)
+        return
+
+    # ── Save recordings from card ─────────────────────────────────────────────
+    if top_action == "Save recordings from card":
+        print_step(
+            "⚠  Run this IMMEDIATELY after inserting the card — macOS Spotlight\n"
+            "   creates ._* shadow files within seconds of mount that corrupt recordings."
+        )
+        volumes = find_mounted_volumes()
+        if not volumes:
+            sys.exit("No volumes found at /Volumes.")
+        vol_choice = questionary.select(
+            "Select Morphagene card volume:",
+            choices=[Choice(title=f"{p.name}  ({p})", value=p) for p in volumes],
+        ).ask()
+        dest = driver.save_recordings(vol_choice, root_folder)
+        if dest and questionary.confirm("Clean macOS metadata from card now?", default=True).ask():
+            driver.clean_card(vol_choice)
+        return
+
+    # ── Clean card before ejecting ────────────────────────────────────────────
+    if top_action == "Clean card before ejecting":
+        volumes = find_mounted_volumes()
+        if not volumes:
+            sys.exit("No volumes found at /Volumes.")
+        vol_choice = questionary.select(
+            "Select Morphagene card volume:",
+            choices=[Choice(title=f"{p.name}  ({p})", value=p) for p in volumes],
+        ).ask()
+        driver.clean_card(vol_choice)
         return
 
     # ── Copy folder to card ───────────────────────────────────────────────────
@@ -104,13 +148,10 @@ def main():
             [p for p in card_folder.iterdir() if p.is_dir() and p.name.isdigit()],
             key=lambda p: int(p.name),
         )
-        scope = questionary.select(
-            "Folders to sync:",
-            choices=[
-                Choice("All folders", value="all"),
-                Choice("Specific folders...", value="pick"),
-            ],
-        ).ask()
+        scope_choices = [Choice("All folders", value="all")]
+        if bank_dirs:
+            scope_choices.append(Choice("Specific folders...", value="pick"))
+        scope = questionary.select("Folders to sync:", choices=scope_choices).ask()
 
         if scope == "pick":
             folder_choices = [
@@ -281,6 +322,43 @@ def main():
             which_profile = next(i for i, p in enumerate(profiles) if p["_name"] == profile_name)
             settings = driver.get_profile(profiles, which_profile)
 
+    # Step 2b: Options preset (Morphagene only)
+    options_preset = None
+    if hasattr(driver, "get_options_preset"):
+        mg_presets = config.get("morphagene_presets", [])
+        existing_options = {}
+        if is_existing:
+            _, existing_options = driver.read_options(target_folder / driver.OPTIONS_FILE)
+            matched = driver.detect_options_preset(existing_options, mg_presets)
+            keep_label = f"Keep current  ({matched})" if matched else "Keep current  (custom)"
+            preset_choices = [Choice(title=keep_label, value="__keep__")]
+        else:
+            preset_choices = []
+
+        preset_choices += [
+            Choice(
+                title=p["_name"] + (f"  — {p['description']}" if "description" in p else ""),
+                value=p["_name"],
+            )
+            for p in mg_presets
+        ]
+        preset_choices.append(Choice(title="Create new preset...", value="__new__"))
+
+        preset_name = questionary.select("Options preset:", choices=preset_choices).ask()
+
+        if preset_name == "__keep__":
+            options_preset = existing_options
+        elif preset_name == "__new__":
+            before = len(mg_presets)
+            driver.create_options_preset(config)
+            if len(mg_presets) > before:
+                options_preset = driver.get_options_preset(mg_presets, len(mg_presets) - 1)
+            else:
+                options_preset = driver.get_options_preset(mg_presets, 0)
+        else:
+            idx = next(i for i, p in enumerate(mg_presets) if p["_name"] == preset_name)
+            options_preset = driver.get_options_preset(mg_presets, idx)
+
     # Step 3: Source
     source_type = questionary.select(
         "Source:",
@@ -415,6 +493,16 @@ def main():
                 settings=settings,
                 empty_folder=empty_folder,
                 overwrite_placeholders=is_existing,
+            )
+        elif hasattr(driver, "get_options_preset"):
+            driver.process(
+                source_folder,
+                target_folder,
+                device,
+                config,
+                overwrite,
+                normalize,
+                options=options_preset,
             )
         else:
             driver.process(source_folder, target_folder, device, config, overwrite, normalize)
