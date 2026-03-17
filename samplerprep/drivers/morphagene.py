@@ -62,6 +62,9 @@ _OPTIONS_DEFS = [
         "Clock control option: 0 hybrid gene shift time stretch, 1 gene shift only, 2 time stretch only",  # noqa: E501
     ),
     ("cvop", 0, "CV out: 0 envelope follow, 1 ramp gene"),
+    ("mcr1", 2.0, "Morph Chord Ratio: 0.06250 to 16.00000, negative is reverse"),
+    ("mcr2", 1.5, "Morph Chord Ratio: 0.06250 to 16.00000, negative is reverse"),
+    ("mcr3", 1.33333, "Morph Chord Ratio: 0.06250 to 16.00000, negative is reverse"),
 ]
 
 
@@ -212,8 +215,9 @@ def read_options(path: Path) -> tuple[str, dict]:
         parts = stripped.split()
         if len(parts) >= 2:
             key = parts[0]
+            val_str = parts[1]
             try:
-                options[key] = int(parts[1])
+                options[key] = float(val_str) if "." in val_str else int(val_str)
             except ValueError:
                 pass
     return (state_line, options)
@@ -221,10 +225,12 @@ def read_options(path: Path) -> tuple[str, dict]:
 
 def write_options(path: Path, options: dict, state_line: str = "0 0 0") -> None:
     """Write options.txt in correct format."""
-    lines = [state_line, "//", "// firmware version 155", "//"]
+    lines = [state_line, "//", "// firmware version 204", "//", "// 0 option is default"]
     for key, default, comment in _OPTIONS_DEFS:
         value = options.get(key, default)
-        lines.append(f"{key} {value} //{comment}")
+        formatted = f"{value:.5f}" if isinstance(value, float) else str(value)
+        lines.append(f"{key} {formatted} //{comment}")
+    lines += ["//", "//Default Chord: 2.0, 1.5, 1.33333"]
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -264,21 +270,31 @@ def create_options_preset(config: dict) -> None:
 
     new_preset: dict = {"_name": name}
     for key, default, comment in _OPTIONS_DEFS:
-        # Build choices from comment (values described after each comma-separated clause)
         comment_parts = comment.split(": ", 1)
         label = comment_parts[0] if comment_parts else key
-        value_descs = comment_parts[1].split(", ") if len(comment_parts) > 1 else []
-        choices = []
-        for desc in value_descs:
-            parts = desc.strip().split(" ", 1)
-            if parts[0].isdigit():
-                val = int(parts[0])
-                desc_text = parts[1] if len(parts) > 1 else str(val)
-                choices.append(Choice(title=f"{val} — {desc_text}", value=val))
-        if not choices:
-            choices = [Choice(title=str(default), value=default)]
 
-        chosen = questionary.select(f"{label}:", choices=choices).ask()
+        if isinstance(default, float):
+            # Continuous float param (mcr1/2/3) — use text input
+            range_hint = comment_parts[1] if len(comment_parts) > 1 else ""
+            raw = questionary.text(f"{label} [{default:.5f}]  (range: {range_hint}):").ask()
+            try:
+                chosen = float(raw) if raw else default
+            except ValueError:
+                chosen = default
+        else:
+            # Integer param — build choices from comment
+            value_descs = comment_parts[1].split(", ") if len(comment_parts) > 1 else []
+            choices = []
+            for desc in value_descs:
+                parts = desc.strip().split(" ", 1)
+                if parts[0].isdigit():
+                    val = int(parts[0])
+                    desc_text = parts[1] if len(parts) > 1 else str(val)
+                    choices.append(Choice(title=f"{val} — {desc_text}", value=val))
+            if not choices:
+                choices = [Choice(title=str(default), value=default)]
+            chosen = questionary.select(f"{label}:", choices=choices).ask()
+
         new_preset[key] = chosen
 
     presets.append(new_preset)
