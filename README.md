@@ -38,6 +38,14 @@ Over the course of development, what started as a simple converter accumulated a
 brew install ffmpeg uv
 ```
 
+Optional (for Morphagene features):
+
+| Tool | Feature | Install |
+|------|---------|---------|
+| sox | Preview browser playback (all devices) | `brew install sox` |
+| rubberband | Pitch/tempo shift | `brew install rubberband` |
+| aubio | Transient auto-detection for splice markers | `brew install aubio` |
+
 ---
 
 ## Installation
@@ -85,7 +93,7 @@ Choose a `settings.txt` profile to write to the volume root. Profiles inherit fr
 
 Files are converted with ffmpeg to the device's native format and organised into the correct folder and file naming structure. Pressing Ctrl-C cleanly interrupts both the Python process and any running ffmpeg child.
 
-For the Radio Music, after processing completes, the tool offers to open the interactive preview browser.
+After processing completes, the tool offers to open the interactive preview browser (Radio Music and Morphagene).
 
 ---
 
@@ -110,6 +118,12 @@ card_folders/morphagene/my-reels/
 ```
 
 Files follow the Morphagene naming scheme: `mg1`–`mg9`, then `mga`–`mgw` (32 total). Format is 32-bit float stereo WAV at 48 kHz, as required by the firmware.
+
+Morphagene-specific processing options:
+
+- **Splice markers** — choose from: none, file boundaries (concat mode), even grid every N seconds, or auto-detect transients (requires `brew install aubio`); markers are stored as standard WAV cue chunks
+- **Cue point passthrough** — existing cue points in source WAVs are preserved and rescaled to 48 kHz
+- **Pitch/tempo shift** — shift pitch by semitones or stretch tempo by a factor via rubberband (requires `brew install rubberband`)
 
 ### Digitakt
 
@@ -178,9 +192,11 @@ The Digitakt shows a reminder about Elektron Transfer instead.
 
 ---
 
-## Preview browser *(Radio Music only)*
+## Preview browser
 
-After preparing a Radio Music folder, the tool offers an interactive preview browser:
+After processing, the tool offers an interactive preview browser. Playback requires `sox` (`brew install sox`). The browser is also available from the top-level menu as **Preview card folder**.
+
+### Radio Music
 
 ```
   Preview: my-pack   Folder 1 / 16
@@ -189,10 +205,23 @@ After preparing a Radio Music folder, the tool offers an interactive preview bro
     1.raw       1.8s
     2.raw       5.0s
   ──────────────────────────────────────────────────────
-  [↑/↓] navigate   [SPACE] play/stop   [←/→] folder   [D] delete   [Q] quit
+  [↑/↓] navigate   [SPACE] play/stop   [←/→] folder   [,/.] seek 5s   [D] delete   [Q] quit
 ```
 
-Playback uses `sox` (`brew install sox`). The browser is also available from the top-level menu as **Preview card folder**.
+### Morphagene
+
+```
+  Morphagene Preview
+  [q] quit  [space] play/stop  [,/.] seek 5s  [[ / ]] prev/next splice
+
+  > ▶  mg1.wav  (4 splices)
+       mg2.wav
+       mg3.wav  (12 splices)
+
+  [████████████|░░░░░░░░░░|░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]  0:42 / 2:15
+```
+
+`[` and `]` jump between splice markers within the playing reel. Splice positions are shown as `|` ticks on the progress bar.
 
 ---
 
