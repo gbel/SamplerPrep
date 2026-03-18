@@ -10,6 +10,8 @@ _DRIVER_MAP = {
     "tracker": "tracker",
     "rample": "rample",
     "queen-of-pentacles": "queen",
+    "bitbox": "bitbox",
+    "squid": "squid",
 }
 
 

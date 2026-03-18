@@ -38,6 +38,7 @@
         "key": "digitakt",
         "name": "Elektron Digitakt",
         "storage": "USB (Elektron Transfer)",
+        "transfer_software": "Elektron Transfer",
         "ffmpeg": {
             "format": "wav",
             "codec": "pcm_s16le",
@@ -116,6 +117,42 @@
             "type": "queen_banks",
             "max_folders": 8,
             "max_files_per_folder": 4
+        }
+    },
+    {
+        "key": "bitbox",
+        "name": "1010music Bitbox mk2 / Micro",
+        "storage": "microSD",
+        "ffmpeg": {
+            "format": "wav",
+            "codec": "pcm_s24le",
+            "sample_rate": 48000,
+            "channels": 2,
+            "strip_metadata": false
+        },
+        "extension": ".wav",
+        "structure": {
+            "type": "presets",
+            "max_slots_per_preset": 16
+        }
+    },
+    {
+        "key": "squid",
+        "name": "ALM/Busy Circuits Squid Salmple",
+        "storage": "USB-stick",
+        "ffmpeg": {
+            "format": "wav",
+            "codec": "pcm_s16le",
+            "sample_rate": 44100,
+            "channels": 1,
+            "strip_metadata": false
+        },
+        "extension": ".wav",
+        "structure": {
+            "type": "banks",
+            "root_folder": "ALM022",
+            "files_per_bank": 8,
+            "max_banks": 99
         }
     }
 ]

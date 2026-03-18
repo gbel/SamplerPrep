@@ -126,7 +126,7 @@ def main():
         from samplerprep.drivers.morphagene import add_reels as mg_add_reels
 
         # Digitakt uses USB, not a card volume
-        if device["storage"].startswith("USB"):
+        if device.get("transfer_software"):
             print_step(f"⚠  {device['name']} uses USB transfer — no SD/CF card slot.")
             print_step("Open Elektron Transfer and drag your output folder into the application.")
             print_step("Download: elektron.se/en/downloads/transfer")
