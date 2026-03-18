@@ -10,7 +10,7 @@ This project started as a fork of [apolakipso/FormatRadio](https://github.com/ap
 
 The friction was the point. Files had to be 16-bit signed little-endian raw PCM, named `0.raw` through `47.raw`, sorted into folders `0/` through `15/`. No headers, no metadata, no mercy. The original community scripts were rough — shell one-liners, Python 2 glue code, manual ffmpeg invocations. This tool grew from that tradition: automate the tedious parts, keep the spirit.
 
-Over the course of development, what started as a simple converter accumulated a settings profile wizard, a Freesound search integration, an interactive audio preview browser, SD card sync with rsync, and eventually support for six more devices. At some point it became something else — a general-purpose sampler preparation tool — and was renamed accordingly.
+Over the course of development, what started as a simple converter accumulated a settings profile wizard, a Freesound search integration, an interactive audio preview browser, SD card sync with rsync, and eventually support for eight more devices. At some point it became something else — a general-purpose sampler preparation tool — and was renamed accordingly.
 
 ---
 
@@ -25,6 +25,8 @@ Over the course of development, what started as a simple converter accumulated a
 | Polyend Tracker | WAV | 44100 Hz | 16-bit | Mono | microSD |
 | Squarp Rample | WAV | 44100 Hz | 16-bit | Mono | microSD |
 | Endorphines Queen of Pentacles | WAV (no metadata) | 44100 Hz | 16-bit | Mono | microSD |
+| 1010music Bitbox mk2 / Micro | WAV | 48000 Hz | 24-bit | Stereo | microSD |
+| ALM/Busy Circuits Squid Salmple | WAV | 44100 Hz | 16-bit | Mono | USB stick |
 
 ---
 
@@ -121,7 +123,7 @@ Files follow the Morphagene naming scheme: `mg1`–`mg9`, then `mga`–`mgw` (32
 
 Morphagene-specific processing options:
 
-- **Splice markers** — choose from: none, file boundaries (concat mode), even grid every N seconds, or auto-detect transients (requires `brew install aubio`); markers are stored as standard WAV cue chunks
+- **Splice markers** — in concat mode, file-boundary markers are added automatically; additional options: even grid every N seconds, or auto-detect transients (requires `brew install aubio`); markers are stored as standard WAV cue chunks
 - **Cue point passthrough** — existing cue points in source WAVs are preserved and rescaled to 48 kHz
 - **Pitch/tempo shift** — shift pitch by semitones or stretch tempo by a factor via rubberband (requires `brew install rubberband`)
 
@@ -191,6 +193,38 @@ card_folders/queen-of-pentacles/my-banks/
 Maximum 32 files (8 banks × 4). All metadata is stripped from output files — the Queen of Pentacles is sensitive to embedded BWF or ID3 chunks.
 
 > **Note:** The bank folder naming (`1/`–`8/`) is inferred from community reports; the official manual PDF was inaccessible during research. Verify against your hardware before copying to the card.
+
+### 1010music Bitbox mk2 / Micro
+
+```
+card_folders/bitbox/my-preset/
+  Presets/
+    my-preset/
+      preset.xml
+      kick.wav  snare.wav  …   ← up to 16 samples per preset
+    my-preset-2/               ← overflow preset if > 16 files
+      preset.xml
+      …
+```
+
+Samples are mapped onto the 4×4 pad grid (16 slots). Each preset folder contains a `preset.xml` that tells the hardware which file goes on which pad — without it the preset won't appear in the device's browser. SamplerPrep generates this XML automatically. Files beyond 16 overflow into additional numbered presets (`{name}-2`, `{name}-3`, …).
+
+Format is 24-bit stereo WAV at 48 kHz, the recommended output format per the [ConvertWithMoss](https://github.com/git-moss/ConvertWithMoss) reference implementation.
+
+> **Note:** The `preset.xml` format was inferred from ConvertWithMoss's Java source and the open-source Bitbox-Editor project — not verified against the official manual (login-gated). The structure should work on both Bitbox mk2 and Micro. Raise an issue if the hardware rejects the XML.
+
+### ALM/Busy Circuits Squid Salmple
+
+```
+card_folders/squid/my-banks/
+  ALM022/
+    01/
+      kick.wav  snare.wav  …   ← up to 8 files per bank
+    02/
+      …
+```
+
+Files are distributed across numbered bank folders inside `ALM022/` on a USB stick. Each bank holds up to 8 samples, one per channel. Up to 99 banks per USB key.
 
 ---
 
@@ -322,6 +356,8 @@ samplerprep/
     tracker.py
     rample.py
     queen.py
+    bitbox.py
+    squid.py
 config.json       ← runtime config and Radio Music profiles
 data.json         ← downloadable sample pack catalogue
 empty_folder/     ← placeholder RAW files for Radio Music skeleton
