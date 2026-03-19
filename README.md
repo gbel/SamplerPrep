@@ -127,19 +127,10 @@ Morphagene-specific processing options:
 - **Cue point passthrough** — existing cue points in source WAVs are preserved and rescaled to 48 kHz
 - **Pitch/tempo shift** — shift pitch by semitones or stretch tempo by a factor via rubberband (requires `brew install rubberband`)
 
-#### macOS and Spotlight
+#### macOS metadata
 
-When a FAT32 card is mounted on macOS, Spotlight begins indexing it within seconds — even without opening Finder. It creates `._*` AppleDouble shadow files and system directories (`.Spotlight-V100`, `.Trashes`, etc.) in the card root. The Morphagene firmware interprets every file in the root as a reel; when it can't parse these stubs, it overwrites them with a 44-byte WAV file, **corrupting your recordings**.
-
-**Permanent fix — exclude the volume from Spotlight:**
-
-1. Open **System Settings → Siri & Spotlight → Spotlight Privacy** (macOS Ventura+), or **System Preferences → Spotlight → Privacy** (Monterey and earlier).
-2. Click **+** and add the mounted card volume (usually named **NO NAME** for a default FAT32 card).
-3. Click **Done**.
-
-Spotlight will no longer index that volume label. The exclusion persists across remounts as long as the volume label doesn't change. This is a one-time setup and eliminates the root cause entirely.
-
-If you skip this step, use **Clean card** from the Morphagene menu (removes all macOS metadata files) before returning the card to the module.
+See [macOS and AppleDouble files](#macos-and-appledouble-files) for how SamplerPrep
+handles `._*` files and Spotlight indexing automatically.
 
 ### Digitakt
 
@@ -225,6 +216,52 @@ card_folders/squid/my-banks/
 ```
 
 Files are distributed across numbered bank folders inside `ALM022/` on a USB stick. Each bank holds up to 8 samples, one per channel. Up to 99 banks per USB key.
+
+---
+
+## macOS and AppleDouble files
+
+When macOS mounts a FAT32 volume (SD card, USB stick), it silently creates hidden
+`._*` "AppleDouble" sidecar files alongside every file you copy — for example
+`._mg1.wav` next to `mg1.wav`. These store macOS-specific metadata (resource forks,
+Finder tags) that no hardware sampler understands.
+
+**Why this matters for the Morphagene:** the firmware scans the card root for anything
+that looks like an audio file. When it finds `._mg1.wav` it tries to parse it, fails,
+and overwrites it with a 44-byte stub WAV — destroying what it thinks is a corrupt reel.
+If that sidecar happened to sit next to a recording you hadn't backed up, the recording
+is gone.
+
+**SamplerPrep mitigates this automatically:**
+
+- **Sync (`Copy folder to card`)** — rsync is called with `--exclude=._*` so AppleDouble
+  files are never written to the card during a sync.
+- **Clean card** — the Morphagene menu includes a *Clean card before ejecting* action
+  that removes all macOS metadata files (`._*`, `.DS_Store`, `.Spotlight-V100`, etc.)
+  from a mounted volume before you eject.
+- **Spotlight indexing** — see [below](#spotlight-indexing) for the permanent fix that
+  stops Spotlight from creating these files in the first place.
+
+Other devices (Squid Salmple, Bitbox, Radio Music) are similarly affected if you copy
+files to their card manually via Finder. Always use *Copy folder to card* rather than
+drag-and-drop to avoid leaving metadata files behind.
+
+### Spotlight indexing
+
+When a FAT32 card is mounted on macOS, Spotlight begins indexing it within seconds —
+even without opening Finder. Beyond `._*` files it also creates `.Spotlight-V100`,
+`.Trashes`, and `.DocumentRevisions-V100` directories. The Morphagene firmware treats
+every file in the card root as a reel; encountering these directories corrupts them.
+
+**Permanent fix:**
+
+1. Open **System Settings → Siri & Spotlight → Spotlight Privacy** (macOS Ventura+),
+   or **System Preferences → Spotlight → Privacy** (Monterey and earlier).
+2. Click **+** and add the mounted card volume (usually **NO NAME** for a default
+   FAT32 card).
+3. Click **Done**.
+
+The exclusion persists across remounts as long as the volume label doesn't change.
 
 ---
 
