@@ -13,6 +13,7 @@ _DRIVER_MAP = {
     "bitbox": "bitbox",
     "squid": "squid",
     "assimil8or": "assimil8or",
+    "clutch": "clutch",
 }
 
 

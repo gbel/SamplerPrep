@@ -172,5 +172,23 @@
             "channels_per_preset": 8,
             "max_presets": 199
         }
+    },
+    {
+        "key": "clutch",
+        "name": "WMD Clutch",
+        "storage": "SD card",
+        "ffmpeg": {
+            "format": "wav",
+            "codec": "pcm_s16le",
+            "sample_rate": 48000,
+            "channels": 1,
+            "strip_metadata": false
+        },
+        "extension": ".wav",
+        "structure": {
+            "type": "clutch_banks",
+            "banks": ["BLUE", "CYAN", "GREEN", "ORANGE", "RED", "VIOLET", "WHITE", "YELLOW"],
+            "pairs_per_bank": 16
+        }
     }
 ]
