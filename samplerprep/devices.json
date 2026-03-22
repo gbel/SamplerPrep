@@ -154,5 +154,23 @@
             "files_per_bank": 8,
             "max_banks": 99
         }
+    },
+    {
+        "key": "assimil8or",
+        "name": "Rossum Electro-Music Assimil8or",
+        "storage": "SD card",
+        "ffmpeg": {
+            "format": "wav",
+            "codec": "pcm_s16le",
+            "sample_rate": 48000,
+            "channels": 1,
+            "strip_metadata": false
+        },
+        "extension": ".wav",
+        "structure": {
+            "type": "assimil8or_presets",
+            "channels_per_preset": 8,
+            "max_presets": 199
+        }
     }
 ]

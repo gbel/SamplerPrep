@@ -12,6 +12,7 @@ _DRIVER_MAP = {
     "queen-of-pentacles": "queen",
     "bitbox": "bitbox",
     "squid": "squid",
+    "assimil8or": "assimil8or",
 }
 
 
