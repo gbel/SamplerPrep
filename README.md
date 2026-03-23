@@ -29,6 +29,7 @@ Over the course of development, what started as a simple converter accumulated a
 | ALM/Busy Circuits Squid Salmple | WAV | 44100 Hz | 16-bit | Mono | USB stick |
 | Rossum Electro-Music Assimil8or | WAV | 48000 Hz | 16-bit | Mono | SD card |
 | WMD Clutch | WAV | 48000 Hz | 16-bit | Mono | SD card |
+| ADDAC112 VC Looper & Granular Processor | WAV (no metadata) | configurable | configurable | configurable | microSD |
 
 ---
 
@@ -267,6 +268,39 @@ The HIHAT.INI settings file at the SD card root is not touched by SamplerPrep.
 > etc.) and to validate your SD card layout.  This driver was developed without access
 > to physical hardware.
 
+### ADDAC112 VC Looper & Granular Processor
+
+```
+card_folders/addac112/my-bank/
+  BANK0/
+    WAV/
+      1_sample.wav   ← up to 99 files, 1-indexed
+      2_sample.wav
+      …
+    DELETED/         ← empty dir, required by firmware
+    SETTINGS.CFG     ← format, granular, and CV settings
+    SCALES.CFG       ← quantizer scale definitions (Default + Custom, 7 slots each)
+    0.CFG            ← seed granular preset
+```
+
+Unlike other supported devices, the ADDAC112 has no fixed audio format — sample rate, bit depth, and channel count are configured per-bank during the wizard. The driver prompts for:
+
+- **Channels** — Mono or Stereo
+- **Sample rate** — 8k / 11.025k / 16k / 22.05k / 36k / 44.1k / 48k / 96k Hz
+- **Bit depth** — 8-bit, 16-bit, or 24-bit (note: 24-bit halves available loop recording time)
+- **Dry volume position** — Pre-FX or Post-FX
+- **Pause mode** — Toggle or Momentary
+- **Grain pitch on loop change** — Keep or Retune
+- **Grain pan mode** — Fixed or Travel
+- **Grain deviation mode** — Random or Spread
+- **Scales** — Factory defaults only, or optionally add HARMONIC or WELL TUNED custom scale presets
+
+All metadata is stripped from output WAVs (`-map_metadata -1 -fflags +bitexact`). A size warning fires if the total WAV folder content exceeds the recommended ~60 MB bank limit.
+
+`SETTINGS.CFG` and a seed `0.CFG` preset are generated from your wizard choices, giving the module a valid configuration to load on first use. Scale data in `SCALES.CFG` is derived from the ADDAC112 user manual (pp. 40–43).
+
+> **Note:** `bit_depth` in `SETTINGS.CFG` uses a non-obvious inverted encoding: `0` = 24-bit, `1` = 8-bit, `2` = 16-bit. SamplerPrep handles this automatically.
+
 ---
 
 ## macOS and AppleDouble files
@@ -447,6 +481,7 @@ samplerprep/
     squid.py
     assimil8or.py
     clutch.py
+    addac112.py
 config.json       ← runtime config and Radio Music profiles
 data.json         ← downloadable sample pack catalogue
 empty_folder/     ← placeholder RAW files for Radio Music skeleton
