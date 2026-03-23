@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.0 — 2026-03-23
+
+### Features
+
+- **ADDAC112 VC Looper & Granular Processor** — new driver; audio format (sample rate, bit depth, channels) is configured per-bank via the wizard. Produces `BANK0/{WAV/,DELETED/,SETTINGS.CFG,SCALES.CFG,0.CFG}` — the complete folder structure the module expects on first load. WAV files are fully stripped of metadata (`-map_metadata -1 -fflags +bitexact`). Warns when total bank size approaches the ~60 MB limit. Scale data (factory defaults + HARMONIC/WELL TUNED custom presets) and CFG formats derived from the ADDAC112 user manual (pp. 40–43). Developed without access to physical hardware.
+- **`wizard_settings` driver hook** — new extension point in `__main__.py` for drivers that need format configuration before source selection; consumed by the ADDAC112 driver and available for future devices.
+
+---
+
 ## v0.3.0 — 2026-03-21
 
 ### Features
