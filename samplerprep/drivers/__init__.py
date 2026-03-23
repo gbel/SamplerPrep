@@ -14,6 +14,7 @@ _DRIVER_MAP = {
     "squid": "squid",
     "assimil8or": "assimil8or",
     "clutch": "clutch",
+    "addac112": "addac112",
 }
 
 
