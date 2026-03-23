@@ -1,6 +1,6 @@
 [project]
 name = "sampler-prep"
-version = "0.2.0"
+version = "0.3.0"
 description = "Prepare audio sample packs for hardware samplers"
 requires-python = ">=3.11"
 dependencies = ["questionary"]

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0 — 2026-03-21
+
+### Features
+
+- **Rossum Electro-Music Assimil8or** — new driver; converts to 16-bit mono WAV at 48 kHz and writes a flat SD card folder with `prst001.yml`–`prst199.yml` (up to 199 presets, 8 channels each, one WAV per channel/Zone 1). SD card structure and preset YAML format inferred from the [A8Manager](https://github.com/cpr2323/A8Manager) open-source project by cpr2323. Developed without access to physical hardware.
+- **WMD Clutch** — new driver; converts to 16-bit mono WAV at 48 kHz and places files into one of 8 colour-coded bank folders (BLUE, CYAN, GREEN, ORANGE, RED, VIOLET, WHITE, YELLOW) named `01CH.wav`/`01OH.wav` through `16CH.wav`/`16OH.wav`. Three assignment modes: alternate CH/OH pairs, all closed, or all open. SD card file-naming inferred from the [ClutchEdit](https://github.com/cpr2323/ClutchEdit) open-source project by cpr2323. Developed without access to physical hardware.
+
+---
+
 ## v0.2.0 — 2026-03-16
 
 ### Features

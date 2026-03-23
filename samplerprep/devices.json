@@ -154,5 +154,59 @@
             "files_per_bank": 8,
             "max_banks": 99
         }
+    },
+    {
+        "key": "assimil8or",
+        "name": "Rossum Electro-Music Assimil8or",
+        "storage": "SD card",
+        "ffmpeg": {
+            "format": "wav",
+            "codec": "pcm_s16le",
+            "sample_rate": 48000,
+            "channels": 1,
+            "strip_metadata": false
+        },
+        "extension": ".wav",
+        "structure": {
+            "type": "assimil8or_presets",
+            "channels_per_preset": 8,
+            "max_presets": 199
+        }
+    },
+    {
+        "key": "addac112",
+        "name": "ADDAC112 VC Looper & Granular Processor",
+        "storage": "microSD",
+        "ffmpeg": {
+            "format": "wav",
+            "codec": "pcm_s16le",
+            "sample_rate": 44100,
+            "channels": 1,
+            "strip_metadata": true
+        },
+        "extension": ".wav",
+        "structure": {
+            "type": "addac112_banks",
+            "max_files_per_bank": 99,
+            "max_bank_size_mb": 60
+        }
+    },
+    {
+        "key": "clutch",
+        "name": "WMD Clutch",
+        "storage": "SD card",
+        "ffmpeg": {
+            "format": "wav",
+            "codec": "pcm_s16le",
+            "sample_rate": 48000,
+            "channels": 1,
+            "strip_metadata": false
+        },
+        "extension": ".wav",
+        "structure": {
+            "type": "clutch_banks",
+            "banks": ["BLUE", "CYAN", "GREEN", "ORANGE", "RED", "VIOLET", "WHITE", "YELLOW"],
+            "pairs_per_bank": 16
+        }
     }
 ]

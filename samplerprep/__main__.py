@@ -373,6 +373,11 @@ def main():
             idx = next(i for i, p in enumerate(mg_presets) if p["_name"] == preset_name)
             options_preset = driver.get_options_preset(mg_presets, idx)
 
+    # Step 2c: Device-specific bank settings (e.g. ADDAC112)
+    bank_settings = None
+    if hasattr(driver, "wizard_settings"):
+        bank_settings = driver.wizard_settings()
+
     # Step 3: Source
     freesound_files: list[str] | None = None
     source_type = questionary.select(
@@ -519,6 +524,16 @@ def main():
                 normalize,
                 options=options_preset,
                 files=freesound_files,
+            )
+        elif hasattr(driver, "wizard_settings"):
+            driver.process(
+                source_folder,
+                target_folder,
+                device,
+                config,
+                overwrite,
+                normalize,
+                settings=bank_settings,
             )
         else:
             driver.process(source_folder, target_folder, device, config, overwrite, normalize)

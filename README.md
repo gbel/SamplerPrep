@@ -27,6 +27,8 @@ Over the course of development, what started as a simple converter accumulated a
 | Endorphines Queen of Pentacles | WAV (no metadata) | 44100 Hz | 16-bit | Mono | microSD |
 | 1010music Bitbox mk2 / Micro | WAV | 48000 Hz | 24-bit | Stereo | microSD |
 | ALM/Busy Circuits Squid Salmple | WAV | 44100 Hz | 16-bit | Mono | USB stick |
+| Rossum Electro-Music Assimil8or | WAV | 48000 Hz | 16-bit | Mono | SD card |
+| WMD Clutch | WAV | 48000 Hz | 16-bit | Mono | SD card |
 
 ---
 
@@ -217,6 +219,54 @@ card_folders/squid/my-banks/
 
 Files are distributed across numbered bank folders inside `ALM022/` on a USB stick. Each bank holds up to 8 samples, one per channel. Up to 99 banks per USB key.
 
+### Rossum Electro-Music Assimil8or
+
+```
+card_folders/assimil8or/my-samples/
+  kick.wav  snare.wav  …   ← WAV files (flat, no subfolders)
+  prst001.yml              ← channels 1–8
+  prst002.yml              ← channels 1–8 (overflow)
+  …
+```
+
+All WAV files and preset YAML files share the same flat folder — the Assimil8or does not support nested directories. Each preset addresses up to 8 channels, one WAV per channel (Zone 1). Files beyond 8 overflow into additional preset files (`prst002.yml`, `prst003.yml`, …) up to a maximum of 199 presets.
+
+The wizard prompts for a preset name; overflow presets are named `{name} 2`, `{name} 3`, etc.
+
+> **Note:** SD card structure and preset YAML format inferred from the
+> [A8Manager](https://github.com/cpr2323/A8Manager) open-source project by cpr2323.
+> Use A8Manager for full preset editing, advanced zone/channel configuration, and
+> SD card validation.  This driver was developed without access to physical hardware.
+
+### WMD Clutch
+
+```
+card_folders/clutch/my-banks/
+  BLUE/
+    01CH.wav  01OH.wav   ← closed/open hi-hat pair 1
+    02CH.wav  02OH.wav
+    …
+    16CH.wav  16OH.wav   ← up to 16 pairs per bank
+  CYAN/
+    …
+```
+
+The Clutch uses 8 colour-coded banks (BLUE, CYAN, GREEN, ORANGE, RED, VIOLET, WHITE, YELLOW). Each bank holds up to 16 closed/open hi-hat sample pairs, named `{pair:02d}CH.wav` (closed) and `{pair:02d}OH.wav` (open).
+
+The wizard asks which bank to target and how to assign files:
+
+- **Alternate CH/OH** — 1st file → `01CH`, 2nd → `01OH`, 3rd → `02CH`, …
+- **All as closed (CH)** — every file becomes a CH sample
+- **All as open (OH)** — every file becomes an OH sample
+
+The HIHAT.INI settings file at the SD card root is not touched by SamplerPrep.
+
+> **Note:** SD card structure and file-naming conventions inferred from the
+> [ClutchEdit](https://github.com/cpr2323/ClutchEdit) open-source project by cpr2323.
+> Use ClutchEdit to edit HIHAT.INI (trigger mode, envelope times, feel patterns, effects,
+> etc.) and to validate your SD card layout.  This driver was developed without access
+> to physical hardware.
+
 ---
 
 ## macOS and AppleDouble files
@@ -395,6 +445,8 @@ samplerprep/
     queen.py
     bitbox.py
     squid.py
+    assimil8or.py
+    clutch.py
 config.json       ← runtime config and Radio Music profiles
 data.json         ← downloadable sample pack catalogue
 empty_folder/     ← placeholder RAW files for Radio Music skeleton
